@@ -1,0 +1,1 @@
+"""Contract evaluation logic (planned)."""

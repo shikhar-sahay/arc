@@ -1,0 +1,1 @@
+"""State restoration logic (planned)."""
