@@ -1,1 +1,1 @@
-"""Contract evaluation logic (planned)."""
+"""Read-only contract evaluation service."""
