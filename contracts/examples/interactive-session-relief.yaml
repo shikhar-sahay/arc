@@ -1,0 +1,19 @@
+# Conceptual contract example (not a schema)
+
+# This file is illustrative only. The ARC contract schema will be
+# architected separately. Do not treat these fields as final.
+name: interactive-session-relief
+description: >
+  Conceptual example: while an interactive session is active, lower the
+  scheduling priority of a background workload, then restore its exact
+  prior state when the session ends.
+target:
+  description: background workload selected by criteria to be defined
+trigger:
+  description: interactive session active (condition language to be defined)
+actions:
+  - description: lower background workload priority (mechanism to be defined)
+termination:
+  description: interactive session ends
+restoration:
+  description: restore recorded nice value and affinity, never assumed defaults
