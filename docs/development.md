@@ -28,6 +28,31 @@ uvicorn arc.api.app:app --reload --port 8000
 
 Health check: `GET http://localhost:8000/api/health`
 
+Other read-only endpoints: `GET /api/system`, `GET /api/contracts`,
+`GET /api/processes?limit=100` (limit must be 1 to 1000).
+
+## Contract validation CLI
+
+After installing the backend package, validate a contract file or a
+directory of contracts:
+
+```bash
+cd backend
+arc validate ../contracts/examples/interactive-session-relief.yaml
+arc validate ../contracts/examples
+```
+
+Exit code 0 means every contract is valid. Failures name the file and
+the reason.
+
+## Live contracts versus examples
+
+- Live contracts are YAML files placed directly in `contracts/`. The
+  engine and API load only those direct files, in sorted order.
+- `contracts/examples/` holds documented examples and is never loaded
+  automatically. Copy an example to `contracts/` to try it as policy.
+- Set `ARC_CONTRACTS_DIR` to point the API at a different directory.
+
 ## Frontend setup
 
 ```bash

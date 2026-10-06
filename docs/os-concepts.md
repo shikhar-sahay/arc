@@ -6,7 +6,10 @@ reading, not a full OS reference.
 ## 1. Processes and process management
 
 ARC observes and acts on running Linux processes: their identities,
-lifetimes, resource usage, and tunable properties. The OS creates,
+lifetimes, resource usage, and tunable properties. PIDs are ephemeral
+(the kernel reuses them), so ARC contracts match on process metadata
+such as executable name and command line instead of persisted PIDs, and
+the monitor re-resolves matches on every cycle. The OS creates,
 schedules, and reaps processes. ARC coordinates policy on top of that
 lifecycle without replacing it.
 
@@ -16,8 +19,11 @@ Linux's Completely Fair Scheduler shares CPU among runnable tasks. The
 nice value (typically -20 to 19) biases a process's scheduling weight:
 lower values request preferential treatment, higher values yield more
 readily. Nice values influence priority relatively, they do not guarantee
-a fixed CPU share. ARC may later adjust nice values as one reversible
-action among others.
+a fixed CPU share. ARC validates nice intents against this range today
+(`NiceAction` accepts -20 to 19) and will apply them as reversible
+actions in the enforcement pass. CPU utilization read back through
+`SystemSnapshot.cpu_percent` is the observation side of the same idea:
+it tells policy how busy the machine is, without promising any share.
 
 ## 3. CPU affinity
 
@@ -38,9 +44,12 @@ reimplement them.
 ## 5. /proc and runtime observation
 
 The `/proc` filesystem exposes per-process and system information (status,
-scheduling parameters, CPU times, memory counters) as files. ARC's future
-monitoring layer reads interfaces like these, plus libraries such as
-psutil, to build the runtime state that contract evaluation reasons over.
+scheduling parameters, CPU times, memory counters) as files. ARC's
+monitoring layer reads through psutil (which itself draws on interfaces
+like these on Linux) to build typed snapshots: `SystemSnapshot` for CPU
+and memory utilization, and `ProcessObservation` entries carrying PID,
+name, command line, and usage counters. Contract evaluation reasons
+over these snapshots without mutating anything.
 
 ## 6. Signals and process control
 

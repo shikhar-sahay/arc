@@ -67,3 +67,18 @@ needing the full project brief restated.
 - Do not rewrite unrelated user changes or remote history.
 - Validate (tests, lint, type checks) before committing.
 - Push completed logical work to the configured remote when available.
+- Coding agents must never invent or configure a Git author identity.
+  Use the existing Git configuration (`git config user.name` and
+  `git config user.email`). If either value is missing, stop before
+  committing, keep the work in the working tree, and report it to the
+  human.
+
+## Domain rules from the read-only engine pass
+
+- Contract YAML is declarative configuration only. Runtime state
+  (matched PIDs, duration timers, evaluation results) must never be
+  written into YAML files.
+- Tests involving durations must use injected monotonic clock values,
+  never real sleeping.
+- Preview evaluation (`would_activate`) must never be reported, logged,
+  or displayed as successful enforcement.

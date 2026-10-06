@@ -1,8 +1,9 @@
 # ARCHITECTURE.md
 
 Authoritative technical architecture for ARC (Adaptive Resource Contract
-Engine). The engine itself is planned and under implementation. This document
-describes the intended system so later passes build in the right direction.
+Engine). The read-only engine (contract model, monitoring, evaluation,
+preview) is implemented. Enforcement and restoration execution are the
+next layer and remain planned.
 
 ## Architectural goals
 
@@ -25,9 +26,11 @@ describes the intended system so later passes build in the right direction.
    `evaluation`, `enforcement`, `restoration`, `observability`): contract
    models, event detection, evaluation, lifecycle, enforcement
    orchestration, restoration, and observability.
-4. **Linux Integration** (adapters inside core-adjacent packages, to be
-   added): `/proc` readers, telemetry collectors, and enforcement adapters
-   for nice values, CPU affinity, signals, and selected cgroups v2 controls.
+4. **Linux Integration** (psutil-based read-only observation now;
+   enforcement adapters for nice values, CPU affinity, signals, and
+   selected cgroups v2 controls to be added): telemetry collectors and
+   process readers today, resource mutation adapters in the enforcement
+   pass.
 5. **Linux Processes and Resources**: the OS-level entities ARC observes
    and acts on.
 
@@ -45,20 +48,66 @@ Dependencies point downward only. The web layer never calls Linux
 integration directly, and the API layer never embeds evaluation or
 enforcement policy.
 
-## ARC Core modules (planned)
+## ARC Core modules (implemented read-only parts)
 
-- `core/`: shared domain primitives and lifecycle state machine.
-- `contracts/`: contract models and validation.
-- `monitoring/`: observation abstractions over process and system state.
-- `evaluation/`: trigger and termination condition evaluation.
-- `enforcement/`: orchestration of resource actions through adapters.
-- `restoration/`: snapshot storage and restoration of prior resource state.
-- `observability/`: decision logs and lifecycle events.
-- `api/`: FastAPI interface to the core.
-- `cli/`: headless operator interface to the core.
+- `core/`: lifecycle states, preview outcomes, duration trackers,
+  per-contract runtime state, and the observation engine loop.
+- `contracts/`: authoritative contract models and YAML loading.
+- `monitoring/`: read-only system telemetry and process observation
+  plus process target resolution, all built on psutil.
+- `evaluation/`: trigger condition evaluation and the read-only
+  contract evaluation service. Independent of FastAPI.
+- `enforcement/`: reserved for the enforcement pass. No execution code
+  exists here yet.
+- `restoration/`: reserved for snapshot storage and restoration
+  execution. Only the restore CONDITION model exists so far.
+- `observability/`: Python logging plus typed evaluation results. No
+  event bus.
+- `api/`: FastAPI read-only interface (health, system, contracts,
+  processes).
+- `cli/`: read-only helpers, currently contract validation.
 
 Core must stay headless-capable: anything the web UI can do should also be
 possible without it.
+
+## Configuration versus runtime state
+
+Contract YAML is declarative configuration: identity, target, trigger,
+actions, restore condition. It is loaded once and never rewritten by
+ARC. Runtime state is transient and per contract: matched PIDs, duration
+timers, latest preview outcome, lifecycle state, and errors. It lives in
+`ContractRuntimeState` objects owned by the observation engine and held
+in memory only. There is no database.
+
+## Target resolution
+
+PIDs are ephemeral, so contracts match on process metadata (executable
+name, command line substring) instead of persisted PIDs. Each cycle the
+engine snapshots processes and resolves every match, sorted by PID.
+When no process matches, a process-targeted contract reports
+`target_not_found` and cannot move toward activation, even if a system
+metric alone would satisfy the trigger.
+
+## Duration semantics and hysteresis
+
+A condition with `for_seconds: N` must hold continuously for N seconds
+before it counts as satisfied. One false sample resets the timer, which
+keeps single-sample spikes from activating policy. Timers run on a
+monotonic clock passed into the evaluation functions, so tests inject
+timestamps instead of sleeping. Trigger and restore conditions are
+separate so episodes use hysteresis (activate above 75, restore below
+55) instead of flapping around one threshold.
+
+## Preview versus enforcement lifecycle
+
+The authoritative lifecycle (`inactive`, `activating`, `active`,
+`restoring`, `error`) will be driven by real enforcement later. The
+read-only evaluator must not claim it. Satisfied triggers therefore
+yield `would_activate`, an explicit preview outcome, while the lifecycle
+stays `inactive`. Preview results must never be logged or displayed as
+successful enforcement. The `ACTIVE` transition will be wired to
+successful action application, and `RESTORING` to real state restoration,
+in the enforcement pass.
 
 ## Conceptual runtime flow
 
@@ -74,7 +123,22 @@ flowchart LR
   Restore --> Mon
 ```
 
-## Contract lifecycle concept (intended, not yet implemented)
+## Contract lifecycle concept (authoritative states, enforcement pending)
+
+```mermaid
+stateDiagram-v2
+  [*] --> INACTIVE
+  INACTIVE --> ACTIVATING: trigger condition satisfied
+  ACTIVATING --> ACTIVE: snapshot prior state, apply actions
+  ACTIVE --> RESTORING: trigger no longer applies or termination condition satisfied
+  RESTORING --> INACTIVE: restore recorded prior state, emit lifecycle events
+  ACTIVATING --> INACTIVE: activation failed, record error
+  RESTORING --> ACTIVE: restoration failed, keep visible until resolved
+```
+
+In the current read-only pass, satisfied triggers yield the preview
+outcome `WOULD_ACTIVATE` and the lifecycle remains `INACTIVE`.
+`ACTIVATING` and beyond require the enforcement pass.
 
 ```mermaid
 stateDiagram-v2
@@ -97,8 +161,12 @@ principle will apply to CPU affinity and other reversible controls.
 
 Every lifecycle transition should emit a structured event: which contract,
 which trigger fired, which actions were applied, which prior values were
-snapshotted, and which values were restored. Logs are local structured
-records. No external database is planned.
+snapshotted, and which values were restored. In the current pass this is
+covered by Python logging (contract loaded, invalid contract, preview
+activation on outcome change, evaluation errors) plus typed evaluation
+results from every cycle. Logs are local structured
+records. No external database is planned. Preview outcomes must never be
+logged as enforcement.
 
 ## Concurrency considerations
 

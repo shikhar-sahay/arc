@@ -79,7 +79,9 @@ logs and events, no external database.
 │   │                   # enforcement, restoration, observability, cli
 │   └── tests/
 ├── frontend/           # React + TypeScript + Vite UI (observation only)
-├── contracts/examples/ # Conceptual contract examples (not a frozen schema)
+├── contracts/          # live contracts directly inside, examples only
+├── contracts/examples/ # documented examples, never auto-loaded
+│                       # (see contracts/README.md)
 ├── docs/               # contracts, development, os-concepts, demo guides
 └── scripts/            # Helper scripts (added as needed)
 ```
@@ -146,12 +148,30 @@ failures.
 
 ## Current project status
 
-This repository currently contains the engineering scaffold and a typed
-health interface (`GET /api/health`) plus a minimal web page showing
-backend connectivity. The ARC policy engine (monitoring, event
-detection, contract evaluation, enforcement, restoration) is planned and
-under active implementation. Documents describe intended behavior and
-are marked where they are conceptual rather than implemented.
+Implemented:
+
+- authoritative initial contract schema (version 1) with YAML
+  validation and loading
+- read-only system and process monitoring built on psutil
+- process target resolution without persisted PIDs
+- trigger evaluation with monotonic duration handling
+- read-only observation engine producing preview outcomes
+  (`would_activate`, never claimed as enforcement)
+- read-only API endpoints: `GET /api/health`, `GET /api/system`,
+  `GET /api/contracts`, `GET /api/processes`
+- contract validation CLI (`arc validate <path>`)
+- minimal web page showing live backend state
+
+Not yet implemented:
+
+- action execution (nice, affinity, suspend, resume)
+- resource state snapshots and restoration execution
+- cgroups enforcement
+- WebSocket live event streaming
+- final dashboard
+
+See `docs/contracts.md` for the schema and `docs/demo.md` for what a
+demonstration can show today.
 
 ## Academic context
 

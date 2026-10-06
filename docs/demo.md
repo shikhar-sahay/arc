@@ -1,7 +1,25 @@
 # Demo (planned)
 
 This demo is planned and does not work yet. It describes what a complete
-ARC lifecycle demonstration should prove once the engine is implemented.
+ARC lifecycle demonstration should prove once enforcement is
+implemented. Enforcement (changing nice values, affinity, or other
+process properties) does not exist yet.
+
+## What can be shown today
+
+Contract parsing and read-only evaluation already work without
+enforcement:
+
+1. Validate an example: `arc validate
+   contracts/examples/interactive-session-relief.yaml`.
+2. Start the API and open `GET /api/contracts` to see the loaded
+   contract with its live preview outcome (`trigger_pending`,
+   `would_activate`, or `target_not_found`).
+3. Start a matching workload (for example a Python process whose
+   command line contains the target substring) and watch the outcome
+   change as conditions hold.
+4. Confirm in the response that ARC changed nothing: outcomes are
+   previews, and no resource property is modified.
 
 ## Intended setup
 
@@ -34,5 +52,6 @@ ARC lifecycle demonstration should prove once the engine is implemented.
 
 ## Status
 
-The engine pieces required for this demo (monitoring, evaluation,
-enforcement, restoration) are not implemented in this bootstrap pass.
+The full demo waits on the enforcement pass (action execution,
+snapshots, restoration execution). Monitoring, target resolution, and
+trigger evaluation are implemented and demonstrable read-only today.
