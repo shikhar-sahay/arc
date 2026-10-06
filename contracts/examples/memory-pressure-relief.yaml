@@ -5,28 +5,28 @@
 # Actions below declare intent only. Enforcement is not implemented yet,
 # so ARC previews evaluation (WOULD_ACTIVATE) without changing resources.
 version: 1
-id: interactive-session-relief
-name: Interactive Session Relief
+id: memory-pressure-relief
+name: Memory Pressure Relief
 description: >
-  While total CPU usage stays high, a background compile worker would be
-  deprioritized. When usage falls back, the restore condition ends the
-  episode so prior state can be restored exactly.
+  While memory usage stays high and a data indexing worker is present,
+  that worker would be constrained to a subset of CPUs. The separate
+  restore threshold provides hysteresis against flapping.
 enabled: true
 target:
   type: process
   match:
     executable: python
-    command_contains: demo_cpu_worker
+    command_contains: index_worker
 trigger:
-  metric: system.cpu.percent
+  metric: system.memory.percent
   operator: gt
-  value: 75
-  for_seconds: 5
+  value: 80
+  for_seconds: 10
 actions:
-  - type: nice
-    value: 10
+  - type: cpu_affinity
+    cpus: [0, 1]
 restore:
-  metric: system.cpu.percent
+  metric: system.memory.percent
   operator: lt
-  value: 55
-  for_seconds: 5
+  value: 60
+  for_seconds: 10
