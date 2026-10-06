@@ -6,6 +6,12 @@ interface HealthState {
   platform: string;
 }
 
+interface SystemState {
+  cpu_percent: number;
+  memory_percent: number;
+  cpu_count: number;
+}
+
 type BackendState =
   | { kind: "loading" }
   | { kind: "ok"; health: HealthState }
@@ -15,6 +21,8 @@ const API_BASE = import.meta.env.VITE_ARC_API_URL ?? "";
 
 export default function App() {
   const [backend, setBackend] = useState<BackendState>({ kind: "loading" });
+  const [system, setSystem] = useState<SystemState | null>(null);
+  const [contractCount, setContractCount] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +50,31 @@ export default function App() {
       }
     }
 
+    async function loadEngineState() {
+      try {
+        const [systemResponse, contractsResponse] = await Promise.all([
+          fetch(`${API_BASE}/api/system`),
+          fetch(`${API_BASE}/api/contracts`),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        if (systemResponse.ok) {
+          setSystem((await systemResponse.json()) as SystemState);
+        }
+        if (contractsResponse.ok) {
+          const payload = (await contractsResponse.json()) as {
+            count: number;
+          };
+          setContractCount(payload.count);
+        }
+      } catch {
+        // Live values stay unavailable. Health box already covers errors.
+      }
+    }
+
     void loadHealth();
+    void loadEngineState();
     return () => {
       cancelled = true;
     };
@@ -87,6 +119,34 @@ export default function App() {
                 uvicorn arc.api.app:app --port 8000
               </span>{" "}
               from backend/.
+            </p>
+          )}
+        </div>
+        <div className="mt-6 rounded-md bg-slate-100 p-4">
+          <h2 className="text-sm font-semibold text-slate-800">
+            Live engine state (read-only)
+          </h2>
+          {system === null && contractCount === null ? (
+            <p className="mt-1 text-sm text-slate-600">
+              Waiting for live values...
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-slate-700">
+              CPU{" "}
+              <span className="font-mono">
+                {system === null ? "n/a" : `${system.cpu_percent.toFixed(1)}%`}
+              </span>
+              , memory{" "}
+              <span className="font-mono">
+                {system === null
+                  ? "n/a"
+                  : `${system.memory_percent.toFixed(1)}%`}
+              </span>
+              , contracts loaded{" "}
+              <span className="font-mono">
+                {contractCount === null ? "n/a" : contractCount}
+              </span>
+              .
             </p>
           )}
         </div>

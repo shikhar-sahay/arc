@@ -1,1 +1,1 @@
-"""ARC command line interface (planned)."""
+"""ARC command line interface: read-only helpers."""
