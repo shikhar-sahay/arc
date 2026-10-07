@@ -3,10 +3,13 @@
 Linux only: every method refuses with ``UnsupportedPlatformError`` on
 other platforms instead of pretending to work. Permission denials from
 the kernel surface as ``ResourcePermissionError``. No shell, no sudo,
-no escalation attempts.
+no escalation attempts. Suspending ARC's own runtime process is refused
+outright so the engine can never deadlock itself with SIGSTOP.
 """
 
+import os
 import sys
+import time
 from collections.abc import Sequence
 
 import psutil
@@ -19,6 +22,9 @@ from arc.linux.resources import (
     ResourcePermissionError,
     UnsupportedPlatformError,
 )
+
+_STOP_VERIFY_ATTEMPTS = 5
+_STOP_VERIFY_DELAY_SECONDS = 0.05
 
 
 def _require_linux(operation: str, pid: int | None = None) -> None:
@@ -113,6 +119,77 @@ class LinuxResourceAdapter:
             raise ResourcePermissionError(
                 operation, pid, "access denied while reading CPU affinity"
             ) from exc
+
+    def is_stopped(self, pid: int) -> bool:
+        """True when the process currently sits in the stopped state."""
+        operation = "is_stopped"
+        proc = _process(operation, pid)
+        try:
+            return proc.status() == psutil.STATUS_STOPPED
+        except psutil.NoSuchProcess as exc:
+            raise ProcessNotFoundError(operation, pid, "process exited during inspection") from exc
+        except psutil.AccessDenied as exc:
+            raise ResourcePermissionError(
+                operation, pid, "access denied while reading process state"
+            ) from exc
+
+    def suspend_process(self, pid: int) -> None:
+        """Stop the process with SIGSTOP and verify it stopped."""
+        operation = "suspend_process"
+        if pid == os.getpid():
+            raise ResourceControlError(
+                operation, pid, "refusing to suspend ARC's own runtime process"
+            )
+        proc = _process(operation, pid)
+        try:
+            proc.suspend()
+        except psutil.NoSuchProcess as exc:
+            raise ProcessNotFoundError(operation, pid, "process exited before suspend") from exc
+        except psutil.AccessDenied as exc:
+            raise ResourcePermissionError(
+                operation,
+                pid,
+                "kernel refused suspend (ownership or capability missing)",
+            ) from exc
+        self._await_state(proc, pid, operation, stopped=True)
+
+    def resume_process(self, pid: int) -> None:
+        """Continue the process with SIGCONT and verify it resumed."""
+        operation = "resume_process"
+        proc = _process(operation, pid)
+        try:
+            proc.resume()
+        except psutil.NoSuchProcess as exc:
+            raise ProcessNotFoundError(operation, pid, "process exited before resume") from exc
+        except psutil.AccessDenied as exc:
+            raise ResourcePermissionError(
+                operation,
+                pid,
+                "kernel refused resume (ownership or capability missing)",
+            ) from exc
+        self._await_state(proc, pid, operation, stopped=False)
+
+    @staticmethod
+    def _await_state(proc: psutil.Process, pid: int, operation: str, stopped: bool) -> None:
+        """Bounded poll until the process reaches the expected state."""
+        want = "stopped" if stopped else "resumed"
+        for _ in range(_STOP_VERIFY_ATTEMPTS):
+            try:
+                is_stopped = proc.status() == psutil.STATUS_STOPPED
+            except psutil.NoSuchProcess as exc:
+                raise ProcessNotFoundError(
+                    operation, pid, "process exited during state verification"
+                ) from exc
+            except psutil.AccessDenied as exc:
+                raise ResourcePermissionError(
+                    operation, pid, "access denied during state verification"
+                ) from exc
+            if is_stopped == stopped:
+                return
+            time.sleep(_STOP_VERIFY_DELAY_SECONDS)
+        raise ResourceControlError(
+            operation, pid, f"process did not reach {want} state after SIGSTOP/SIGCONT"
+        )
 
     def set_affinity(self, pid: int, cpus: Sequence[int]) -> None:
         """Set CPU affinity. Invalid or disallowed CPUs fail explicitly."""

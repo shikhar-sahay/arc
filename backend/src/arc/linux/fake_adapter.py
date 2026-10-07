@@ -26,13 +26,15 @@ class FakeProcess:
     name: str | None = None
     nice: int = 0
     affinity: tuple[int, ...] = (0,)
+    stopped: bool = False
     alive: bool = True
 
 
 class FakeResourceAdapter:
     """Test double implementing the resource protocol in memory."""
 
-    def __init__(self) -> None:
+    def __init__(self, engine_pid: int | None = None) -> None:
+        self.engine_pid = engine_pid
         self._processes: dict[int, FakeProcess] = {}
         self.calls: list[tuple[str, int, object]] = []
         self.fail_sets: set[tuple[str, int]] = set()
@@ -111,6 +113,28 @@ class FakeResourceAdapter:
             )
         self.calls.append(("set_affinity", pid, wanted))
         proc.affinity = wanted
+
+    def is_stopped(self, pid: int) -> bool:
+        """Read the fake stopped flag."""
+        return self._live("is_stopped", pid).stopped
+
+    def suspend_process(self, pid: int) -> None:
+        """Stop the fake process, honoring injected failures."""
+        if self.engine_pid is not None and pid == self.engine_pid:
+            raise ResourceControlError(
+                "suspend_process", pid, "refusing to suspend ARC's own runtime process"
+            )
+        self._check_injected("suspend_process", pid)
+        proc = self._live("suspend_process", pid)
+        self.calls.append(("suspend_process", pid, True))
+        proc.stopped = True
+
+    def resume_process(self, pid: int) -> None:
+        """Continue the fake process, honoring injected failures."""
+        self._check_injected("resume_process", pid)
+        proc = self._live("resume_process", pid)
+        self.calls.append(("resume_process", pid, False))
+        proc.stopped = False
 
     def set_calls_for(self, operation: str, pid: int) -> list[object]:
         """Values passed to one mutation, in call order (order assertions)."""

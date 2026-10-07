@@ -7,8 +7,11 @@ is never touched: that is a stale-target failure. Restored values are
 read back and verified.
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from arc.linux.resources import (
     ProcessNotFoundError,
@@ -16,6 +19,10 @@ from arc.linux.resources import (
     ResourceControlError,
     ResourceSnapshot,
 )
+
+if TYPE_CHECKING:
+    from arc.linux.cgroups import CgroupManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +65,13 @@ class RestorationResult:
 
 
 def restore_snapshots(
-    snapshots: list[ResourceSnapshot], adapter: ResourceAdapter
+    snapshots: list[ResourceSnapshot],
+    adapter: ResourceAdapter,
+    cgroup_manager: CgroupManager | None = None,
 ) -> RestorationResult:
     """Restore exact captured values with identity checks and verification."""
+    from arc.linux.cgroups import CgroupLease, CgroupManager  # noqa: F401
+
     entries: list[RestoreEntry] = []
     for snapshot in sorted(snapshots, key=lambda snap: snap.identity.pid):
         pid = snapshot.identity.pid
@@ -100,6 +111,30 @@ def restore_snapshots(
                         pid,
                         f"affinity {list(snapshot.affinity)} did not take effect",
                     )
+            if snapshot.stopped is not None:
+                is_curr_stopped = adapter.is_stopped(pid)
+                if snapshot.stopped != is_curr_stopped:
+                    if snapshot.stopped:
+                        adapter.suspend_process(pid)
+                    else:
+                        adapter.resume_process(pid)
+                if adapter.is_stopped(pid) != snapshot.stopped:
+                    raise ResourceControlError(
+                        "restore_verify",
+                        pid,
+                        f"process stopped state {snapshot.stopped} did not take effect",
+                    )
+            if snapshot.cpu_quota is not None and cgroup_manager is not None:
+                assert snapshot.cgroup_leaf is not None
+                assert snapshot.cgroup_origin is not None
+                lease = CgroupLease(
+                    pid=pid,
+                    create_time=snapshot.identity.create_time,
+                    leaf=snapshot.cgroup_leaf,
+                    origin=snapshot.cgroup_origin,
+                    previous_cpu_max=snapshot.cpu_quota,
+                )
+                cgroup_manager.leave(lease)
         except ResourceControlError as exc:
             logger.error("restoration failed for pid %s: %s", pid, exc)
             entries.append(RestoreEntry(pid=pid, status="failed", detail=str(exc)))

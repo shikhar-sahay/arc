@@ -105,16 +105,20 @@ def test_disabled_contract_never_enforces() -> None:
 
 
 def test_unsupported_action_fails_without_mutation() -> None:
-    """Suspend has no executor: explicit failure, zero resource writes."""
-    engine, fake = make_engine(
-        [make_contract(actions=[{"type": "suspend"}])],
-    )
+    """An unsupported action type fails: explicit failure, zero resource writes."""
+    contract = make_contract()
+
+    class BogusAction:
+        type = "bogus_unsupported_action"
+
+    contract.actions.append(BogusAction())  # type: ignore[arg-type]
+    engine, fake = make_engine([contract])
 
     engine.step(make_telemetry(), _obs(), now=0.0)
     result = engine.step(make_telemetry(), _obs(), now=5.0)
 
     assert result.evaluations[0].outcome is EvaluationOutcome.ACTIVATION_ERROR
-    assert "suspend" in (result.evaluations[0].error or "")
+    assert "bogus_unsupported_action" in (result.evaluations[0].error or "")
     assert fake.calls == []
     assert engine.runtime_for("compile-relief").lifecycle is LifecycleState.ERROR
 

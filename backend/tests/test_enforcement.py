@@ -15,8 +15,14 @@ def _seed(fake: FakeResourceAdapter, *pids: int) -> None:
 
 
 def test_supported_action_types() -> None:
-    """Only nice and cpu_affinity execute in this pass."""
-    assert SUPPORTED_ACTION_TYPES == ("nice", "cpu_affinity")
+    """Supported action types include nice, cpu_affinity, suspend, resume, and cpu_quota."""
+    assert set(SUPPORTED_ACTION_TYPES) == {
+        "nice",
+        "cpu_affinity",
+        "suspend",
+        "resume",
+        "cpu_quota",
+    }
 
 
 def test_successful_nice_activation() -> None:
@@ -138,14 +144,19 @@ def test_rollback_failure_is_surfaced() -> None:
 
 
 def test_unsupported_action_applies_nothing() -> None:
-    """Suspend/resume fail closed before any snapshot or mutation."""
+    """An unsupported action type fails closed before any snapshot or mutation."""
     fake = make_fake(pid=50)
-    contract = make_contract(actions=[{"type": "suspend"}])
+
+    class BogusAction:
+        type = "bogus_unsupported_action"
+
+    contract = make_contract()
+    contract.actions.append(BogusAction())  # type: ignore[arg-type]
 
     result = activate_contract(contract, _targets(50), fake)
 
     assert result.ok is False
-    assert "suspend" in (result.failure.error if result.failure else "")
+    assert "bogus_unsupported_action" in (result.failure.error if result.failure else "")
     assert result.snapshots == []
     assert fake.calls == []
 

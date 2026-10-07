@@ -30,6 +30,7 @@ from arc.evaluation.service import (
     evaluate_restore,
 )
 from arc.linux.capabilities import PlatformCapabilities, detect_capabilities
+from arc.linux.cgroups import CgroupManager, LinuxCgroupManager
 from arc.linux.psutil_adapter import LinuxResourceAdapter
 from arc.linux.resources import (
     ProcessIdentity,
@@ -81,6 +82,8 @@ class EngineStatusView:
     active_contracts: int
     error_contracts: int
     event_count: int
+    cgroup_available: bool = False
+    cgroup_reason: str = ""
 
 
 @dataclass
@@ -102,6 +105,7 @@ class ObservationEngine:
         system_monitor: SystemMonitor | None = None,
         process_sampler: Callable[[], list[ProcessObservation]] | None = None,
         resource_adapter: ResourceAdapter | None = None,
+        cgroup_manager: CgroupManager | None = None,
     ) -> None:
         if poll_interval_seconds <= 0:
             raise ValueError("poll_interval_seconds must be positive")
@@ -110,6 +114,7 @@ class ObservationEngine:
         self._monitor = system_monitor or SystemMonitor()
         self._process_sampler = process_sampler or sample_processes
         self._adapter = resource_adapter or LinuxResourceAdapter()
+        self._cgroup_manager: CgroupManager = cgroup_manager or LinuxCgroupManager()
         self._capabilities = detect_capabilities()
         self._events = EventLog()
         self._lock = threading.Lock()
@@ -161,6 +166,93 @@ class ObservationEngine:
             runtime.reset_error()
             logger.info("contract %s manually reset to inactive", contract_id)
             return True
+
+    def reload_contracts(self, new_contracts: Sequence[Contract]) -> None:
+        """Reload contract definitions atomically without disrupting live monitoring.
+
+        Preserves existing runtimes for active/restoring/error contracts where IDs match.
+        For new contracts, initializes clean runtime state.
+        For removed contracts:
+        - If active or restoring, raises ValueError to protect active enforcement.
+        - Otherwise, drops runtime state cleanly.
+        """
+        with self._lock:
+            new_contract_map = {c.id: c for c in new_contracts}
+            # Check if any active contract is being removed
+            for old_id, runtime in self._runtimes.items():
+                if old_id not in new_contract_map:
+                    if runtime.lifecycle in (
+                        LifecycleState.ACTIVE,
+                        LifecycleState.ACTIVATING,
+                        LifecycleState.RESTORING,
+                    ):
+                        msg = (
+                            f"cannot remove contract {old_id} "
+                            f"while in state {runtime.lifecycle.value}"
+                        )
+                        raise ValueError(msg)
+
+            updated_runtimes: dict[str, ContractRuntimeState] = {}
+            for contract in new_contracts:
+                if contract.id in self._runtimes:
+                    # Preserve existing runtime state
+                    rt = self._runtimes[contract.id]
+                    rt.trigger_tracker.required_seconds = contract.trigger.for_seconds
+                    rt.restore_tracker.required_seconds = contract.restore.for_seconds
+                    updated_runtimes[contract.id] = rt
+                else:
+                    rt = ContractRuntimeState(contract_id=contract.id)
+                    rt.trigger_tracker.required_seconds = contract.trigger.for_seconds
+                    rt.restore_tracker.required_seconds = contract.restore.for_seconds
+                    updated_runtimes[contract.id] = rt
+
+            self._contracts = list(new_contracts)
+            self._runtimes = updated_runtimes
+            logger.info("reloaded %d contract(s) into engine", len(self._contracts))
+
+    def enable_contract(self, contract_id: str, enabled: bool) -> Contract:
+        """Toggle enabled flag for a contract definition."""
+        with self._lock:
+            idx = next((i for i, c in enumerate(self._contracts) if c.id == contract_id), None)
+            if idx is None:
+                raise KeyError(f"contract {contract_id} not found")
+            current = self._contracts[idx]
+            if current.enabled == enabled:
+                return current
+            updated = current.model_copy(update={"enabled": enabled})
+            self._contracts[idx] = updated
+            return updated
+
+    def set_contract(self, contract: Contract) -> None:
+        """Add or update a contract definition in memory.
+
+        Refuses update if the existing contract is currently ACTIVE, ACTIVATING, or RESTORING.
+        """
+        with self._lock:
+            runtime = self._runtimes.get(contract.id)
+            if runtime is not None and runtime.lifecycle in (
+                LifecycleState.ACTIVE,
+                LifecycleState.ACTIVATING,
+                LifecycleState.RESTORING,
+            ):
+                raise ValueError(
+                    f"cannot modify contract {contract.id} while in state {runtime.lifecycle.value}"
+                )
+
+            idx = next((i for i, c in enumerate(self._contracts) if c.id == contract.id), None)
+            if idx is not None:
+                self._contracts[idx] = contract
+            else:
+                self._contracts.append(contract)
+
+            if runtime is None:
+                rt = ContractRuntimeState(contract_id=contract.id)
+                rt.trigger_tracker.required_seconds = contract.trigger.for_seconds
+                rt.restore_tracker.required_seconds = contract.restore.for_seconds
+                self._runtimes[contract.id] = rt
+            else:
+                runtime.trigger_tracker.required_seconds = contract.trigger.for_seconds
+                runtime.restore_tracker.required_seconds = contract.restore.for_seconds
 
     def step(
         self,
@@ -238,6 +330,7 @@ class ObservationEngine:
                 for runtime in self._runtimes.values()
                 if runtime.lifecycle is LifecycleState.ERROR
             )
+            cg_caps = self._cgroup_manager.capabilities()
             return EngineStatusView(
                 running=self._running,
                 platform=self._capabilities.platform,
@@ -249,6 +342,8 @@ class ObservationEngine:
                 active_contracts=active,
                 error_contracts=errored,
                 event_count=len(self._events),
+                cgroup_available=cg_caps.available,
+                cgroup_reason=cg_caps.reason,
             )
 
     def recent_events(self, limit: int = 100) -> list[ArcEvent]:
@@ -264,6 +359,17 @@ class ObservationEngine:
         """Copy of the last process snapshot."""
         with self._lock:
             return list(self._latest_observations)
+
+    def managed_pids_by_contract(self) -> dict[int, list[str]]:
+        """Map each currently managed PID to the active contract IDs applying to it."""
+        with self._lock:
+            result: dict[int, list[str]] = {}
+            for contract in self._contracts:
+                runtime = self._runtimes.get(contract.id)
+                if runtime is not None and runtime.lifecycle is LifecycleState.ACTIVE:
+                    for snap in runtime.snapshots:
+                        result.setdefault(snap.identity.pid, []).append(contract.id)
+            return result
 
     def _status_view(self, contract: Contract) -> ContractStatusView:
         runtime = self._runtimes[contract.id]
@@ -340,7 +446,9 @@ class ObservationEngine:
             contract_id=contract.id,
         )
         try:
-            result = activate_contract(contract, matched, self._adapter)
+            result = activate_contract(
+                contract, matched, self._adapter, cgroup_manager=self._cgroup_manager
+            )
         except Exception as exc:
             logger.exception("contract %s activation crashed", contract.id)
             result = None
@@ -571,7 +679,7 @@ class ObservationEngine:
         restored_note = "no live snapshots to restore"
         if live:
             try:
-                result = restore_snapshots(live, self._adapter)
+                result = restore_snapshots(live, self._adapter, cgroup_manager=self._cgroup_manager)
             except Exception as exc:
                 logger.exception("contract %s restoration crashed", contract.id)
                 result = None
@@ -625,7 +733,9 @@ class ObservationEngine:
             contract_id=contract.id,
         )
         try:
-            result = restore_snapshots(live_snapshots, self._adapter)
+            result = restore_snapshots(
+                live_snapshots, self._adapter, cgroup_manager=self._cgroup_manager
+            )
         except Exception as exc:
             logger.exception("contract %s restoration crashed", contract.id)
             runtime.transition_to(LifecycleState.ERROR)

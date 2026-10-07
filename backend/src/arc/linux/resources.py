@@ -34,11 +34,19 @@ class ResourceSnapshot:
 
     Only properties ARC intends to modify are captured (``None`` means
     untouched). Restoration writes these values back, never defaults.
+    ``stopped`` records whether the process was already stopped before a
+    suspend/resume action, so restoration returns it to the correct prior
+    state. ``cpu_quota`` records the previous cgroups v2 cpu.max content
+    with the ARC leaf and origin cgroup paths needed to restore it.
     """
 
     identity: ProcessIdentity
     nice: int | None = None
     affinity: tuple[int, ...] | None = None
+    stopped: bool | None = None
+    cpu_quota: str | None = None
+    cgroup_leaf: str | None = None
+    cgroup_origin: str | None = None
 
 
 class ResourceControlError(Exception):
@@ -75,8 +83,12 @@ class InvalidCpusError(ResourceControlError):
     """Requested CPUs are not usable for the target process."""
 
 
+class CgroupUnavailableError(ResourceControlError):
+    """cgroups v2 enforcement is unavailable or refused for this target."""
+
+
 class ResourceAdapter(Protocol):
-    """Minimal interface the engine needs for nice/affinity control."""
+    """Minimal interface the engine needs for process resource control."""
 
     @property
     def enforcement_supported(self) -> bool:
@@ -101,4 +113,16 @@ class ResourceAdapter(Protocol):
 
     def set_affinity(self, pid: int, cpus: Sequence[int]) -> None:
         """Set CPU affinity. Must raise, never silently skip."""
+        ...
+
+    def is_stopped(self, pid: int) -> bool:
+        """True when the process is in the stopped (SIGSTOP) state."""
+        ...
+
+    def suspend_process(self, pid: int) -> None:
+        """Stop the process with SIGSTOP and verify it stopped."""
+        ...
+
+    def resume_process(self, pid: int) -> None:
+        """Continue the process with SIGCONT and verify it resumed."""
         ...
