@@ -3,8 +3,10 @@
 from arc.contracts.loader import (
     ContractLoadError,
     collect_contract_files,
+    default_contracts_dir,
     load_contract_directory,
     load_contract_file,
+    resolve_contracts_dir,
 )
 from arc.contracts.models import (
     BooleanOperator,
@@ -26,6 +28,7 @@ __all__ = [
     "Contract",
     "ContractLoadError",
     "collect_contract_files",
+    "default_contracts_dir",
     "CpuAffinityAction",
     "MetricName",
     "NiceAction",
@@ -36,4 +39,5 @@ __all__ = [
     "SuspendAction",
     "load_contract_directory",
     "load_contract_file",
+    "resolve_contracts_dir",
 ]

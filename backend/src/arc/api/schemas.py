@@ -1,4 +1,4 @@
-"""Typed API models for the ARC read-only interface.
+"""Typed API models for the ARC interface.
 
 Domain models (contracts, snapshots, evaluations) are reused directly
 where they already serialize cleanly. The response wrappers below add
@@ -8,17 +8,38 @@ only transport-level shape such as counts and load errors.
 from pydantic import BaseModel, Field
 
 from arc.contracts.models import Contract
-from arc.core.lifecycle import EvaluationOutcome
+from arc.core.lifecycle import EvaluationOutcome, LifecycleState
 from arc.monitoring.processes import ProcessObservation
 from arc.monitoring.system import SystemSnapshot
+from arc.observability.events import ArcEvent, ArcEventType
 
 
 class HealthResponse(BaseModel):
-    """Typed response for GET /api/health."""
+    """Liveness plus engine summary for GET /api/health."""
 
     app: str
     status: str
     platform: str
+    engine_running: bool = False
+    enforcement_supported: bool = False
+    contract_count: int = 0
+    active_contracts: int = 0
+    error_contracts: int = 0
+
+
+class EngineStatusResponse(BaseModel):
+    """Full engine and capability report for GET /api/status."""
+
+    running: bool
+    platform: str
+    enforcement_supported: bool
+    euid: int | None = None
+    privileged_hint: bool | None = None
+    poll_interval_seconds: float
+    contract_count: int
+    active_contracts: int
+    error_contracts: int
+    event_count: int
 
 
 class SystemResponse(BaseModel):
@@ -70,14 +91,27 @@ class ProcessListResponse(BaseModel):
     total_observed: int
 
 
+class TargetIdentityResponse(BaseModel):
+    """A resolved target process identity for GET /api/contracts."""
+
+    pid: int
+    create_time: float
+    name: str | None = None
+
+
 class ContractStatus(BaseModel):
-    """A loaded contract plus its latest read-only evaluation."""
+    """A loaded contract plus its live runtime state."""
 
     contract: Contract
+    lifecycle: LifecycleState = LifecycleState.INACTIVE
     outcome: EvaluationOutcome | None = None
     matched_pids: list[int] = Field(default_factory=list)
+    active_targets: list[TargetIdentityResponse] = Field(default_factory=list)
     trigger_raw: bool | None = None
     trigger_satisfied: bool | None = None
+    restore_raw: bool | None = None
+    restore_satisfied: bool | None = None
+    activated_at: float | None = None
     detail: str = ""
     error: str | None = None
 
@@ -95,3 +129,38 @@ class ContractListResponse(BaseModel):
     contracts: list[ContractStatus]
     count: int
     load_errors: list[ContractLoadIssue] = Field(default_factory=list)
+
+
+class EventResponse(BaseModel):
+    """One ARC lifecycle event, newest first in listings."""
+
+    seq: int
+    timestamp: float
+    type: ArcEventType
+    severity: str
+    contract_id: str | None = None
+    pid: int | None = None
+    message: str
+    details: dict[str, object] = Field(default_factory=dict)
+
+    @classmethod
+    def from_event(cls, event: ArcEvent) -> "EventResponse":
+        """Build a response from a domain event."""
+        return cls(
+            seq=event.seq,
+            timestamp=event.timestamp,
+            type=event.type,
+            severity=event.severity,
+            contract_id=event.contract_id,
+            pid=event.pid,
+            message=event.message,
+            details=event.details,
+        )
+
+
+class EventListResponse(BaseModel):
+    """Bounded newest-first event history for GET /api/events."""
+
+    events: list[EventResponse]
+    count: int
+    limit: int

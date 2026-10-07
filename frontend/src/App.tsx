@@ -4,12 +4,23 @@ interface HealthState {
   app: string;
   status: string;
   platform: string;
+  engine_running: boolean;
+  enforcement_supported: boolean;
+  contract_count: number;
+  active_contracts: number;
+  error_contracts: number;
 }
 
 interface SystemState {
   cpu_percent: number;
   memory_percent: number;
   cpu_count: number;
+}
+
+interface EngineEvent {
+  seq: number;
+  type: string;
+  message: string;
 }
 
 type BackendState =
@@ -23,6 +34,7 @@ export default function App() {
   const [backend, setBackend] = useState<BackendState>({ kind: "loading" });
   const [system, setSystem] = useState<SystemState | null>(null);
   const [contractCount, setContractCount] = useState<number | null>(null);
+  const [events, setEvents] = useState<EngineEvent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,10 +64,12 @@ export default function App() {
 
     async function loadEngineState() {
       try {
-        const [systemResponse, contractsResponse] = await Promise.all([
-          fetch(`${API_BASE}/api/system`),
-          fetch(`${API_BASE}/api/contracts`),
-        ]);
+        const [systemResponse, contractsResponse, eventsResponse] =
+          await Promise.all([
+            fetch(`${API_BASE}/api/system`),
+            fetch(`${API_BASE}/api/contracts`),
+            fetch(`${API_BASE}/api/events?limit=5`),
+          ]);
         if (cancelled) {
           return;
         }
@@ -67,6 +81,12 @@ export default function App() {
             count: number;
           };
           setContractCount(payload.count);
+        }
+        if (eventsResponse.ok) {
+          const payload = (await eventsResponse.json()) as {
+            events: EngineEvent[];
+          };
+          setEvents(payload.events);
         }
       } catch {
         // Live values stay unavailable. Health box already covers errors.
@@ -110,6 +130,20 @@ export default function App() {
               <span className="font-mono">{backend.health.status}</span> on
               platform{" "}
               <span className="font-mono">{backend.health.platform}</span>.
+              Engine {backend.health.engine_running ? "running" : "stopped"},
+              enforcement{" "}
+              {backend.health.enforcement_supported
+                ? "supported"
+                : "not supported"}
+              , active contracts{" "}
+              <span className="font-mono">
+                {backend.health.active_contracts}
+              </span>
+              , errors{" "}
+              <span className="font-mono">
+                {backend.health.error_contracts}
+              </span>
+              .
             </p>
           )}
           {backend.kind === "error" && (
@@ -148,6 +182,22 @@ export default function App() {
               </span>
               .
             </p>
+          )}
+        </div>
+        <div className="mt-6 rounded-md bg-slate-100 p-4">
+          <h2 className="text-sm font-semibold text-slate-800">
+            Latest engine events
+          </h2>
+          {events.length === 0 ? (
+            <p className="mt-1 text-sm text-slate-600">No events yet.</p>
+          ) : (
+            <ul className="mt-1 space-y-1 text-sm text-slate-700">
+              {events.map((event) => (
+                <li key={event.seq} className="font-mono text-xs">
+                  [{event.type}] {event.message}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
         <p className="mt-4 text-xs text-slate-500">

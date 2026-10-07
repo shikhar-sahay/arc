@@ -6,6 +6,7 @@ implicitly, examples are documentation, not live policy.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import yaml
@@ -16,6 +17,21 @@ from arc.contracts.models import Contract
 logger = logging.getLogger(__name__)
 
 CONTRACT_FILE_PATTERNS = ("*.yaml", "*.yml")
+
+
+def default_contracts_dir() -> Path:
+    """Repository-level contracts directory (live contracts, not examples)."""
+    return Path(__file__).resolve().parents[4] / "contracts"
+
+
+def resolve_contracts_dir(explicit: Path | str | None = None) -> Path:
+    """Explicit path, ARC_CONTRACTS_DIR, or the repository default."""
+    if explicit is not None:
+        return Path(explicit)
+    configured = os.environ.get("ARC_CONTRACTS_DIR")
+    if configured:
+        return Path(configured)
+    return default_contracts_dir()
 
 
 class ContractLoadError(Exception):
