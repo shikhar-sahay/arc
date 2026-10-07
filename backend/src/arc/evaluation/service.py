@@ -1,9 +1,10 @@
-"""Read-only contract evaluation, independent of FastAPI.
+"""Contract evaluation: trigger path plus restore condition checks.
 
-Evaluation answers whether a trigger condition holds and for how long,
-using an injected monotonic clock value so tests advance time without
-sleeping. Satisfied triggers yield ``WOULD_ACTIVATE`` (a preview), never
-a claim that enforcement happened.
+Evaluation answers whether a condition holds and for how long, using an
+injected monotonic clock value so tests advance time without sleeping.
+The engine decides lifecycle moves; this module only evaluates
+conditions and records trigger-side runtime state. Independent of
+FastAPI.
 """
 
 import logging
@@ -44,12 +45,15 @@ class ConditionEvaluation:
 
 @dataclass
 class ContractEvaluation:
-    """Read-only evaluation result for one contract in one cycle."""
+    """Evaluation result for one contract in one cycle."""
 
     contract_id: str
     outcome: EvaluationOutcome
+    lifecycle: LifecycleState = LifecycleState.INACTIVE
     trigger_raw: bool | None = None
     trigger_satisfied: bool | None = None
+    restore_raw: bool | None = None
+    restore_satisfied: bool | None = None
     matched_pids: list[int] = field(default_factory=list)
     detail: str = ""
     error: str | None = None
@@ -114,6 +118,20 @@ def evaluate_condition(
     )
 
 
+def evaluate_restore(
+    contract: Contract,
+    telemetry: SystemSnapshot,
+    matched: list[ProcessObservation],
+    runtime: ContractRuntimeState,
+    now: float,
+) -> ConditionEvaluation:
+    """Evaluate the restore condition with its own duration tracker."""
+    result = evaluate_condition(contract.restore, telemetry, matched, runtime.restore_tracker, now)
+    runtime.last_restore_raw = result.raw
+    runtime.last_restore_satisfied = result.satisfied
+    return result
+
+
 def evaluate_contract(
     contract: Contract,
     telemetry: SystemSnapshot,
@@ -134,7 +152,7 @@ def evaluate_contract(
     except Exception as exc:
         message = f"target resolution failed: {exc}"
         logger.warning("contract %s: %s", contract.id, message)
-        runtime.lifecycle = LifecycleState.ERROR
+        runtime.transition_to(LifecycleState.ERROR)
         runtime.last_error = message
         runtime.note_evaluated(EvaluationOutcome.EVALUATION_ERROR, now)
         return ContractEvaluation(
@@ -161,7 +179,7 @@ def evaluate_contract(
     except (ConditionEvaluationError, ValueError) as exc:
         message = f"trigger evaluation failed: {exc}"
         logger.warning("contract %s: %s", contract.id, message)
-        runtime.lifecycle = LifecycleState.ERROR
+        runtime.transition_to(LifecycleState.ERROR)
         runtime.last_error = message
         runtime.note_evaluated(EvaluationOutcome.EVALUATION_ERROR, now)
         return ContractEvaluation(

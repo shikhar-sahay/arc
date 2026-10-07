@@ -1,19 +1,25 @@
 """Contract lifecycle states and per-contract runtime state.
 
 Configuration (the YAML contract) is declarative and persistent. Runtime
-state (duration timers, matched PIDs, evaluation results) is transient,
-kept in memory, and never written back into YAML files.
+state (duration timers, matched PIDs, snapshots, lifecycle, evaluation
+results) is transient, kept in memory, and never written back into YAML
+files.
 
-Because enforcement is not implemented yet, the read-only evaluator
-reports preview outcomes such as ``WOULD_ACTIVATE`` and leaves the
-lifecycle in ``INACTIVE``. The authoritative ``ACTIVE`` transition will
-be wired to successful enforcement in a later pass. Preview results must
-never be reported as successful enforcement.
+Lifecycle moves only through ``transition_to``, which enforces the
+allowed map. Satisfied triggers on platforms without enforcement yield
+the ``WOULD_ACTIVATE`` preview while the lifecycle stays ``INACTIVE``.
+Preview results must never be reported as successful enforcement.
 """
 
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
+
+from arc.linux.resources import ResourceSnapshot
+
+
+class LifecycleTransitionError(Exception):
+    """An illegal lifecycle move was attempted."""
 
 
 class LifecycleState(StrEnum):
@@ -26,13 +32,29 @@ class LifecycleState(StrEnum):
     ERROR = "error"
 
 
+_ALLOWED_TRANSITIONS: dict[LifecycleState, frozenset[LifecycleState]] = {
+    LifecycleState.INACTIVE: frozenset({LifecycleState.ACTIVATING, LifecycleState.ERROR}),
+    LifecycleState.ACTIVATING: frozenset({LifecycleState.ACTIVE, LifecycleState.ERROR}),
+    LifecycleState.ACTIVE: frozenset({LifecycleState.RESTORING, LifecycleState.ERROR}),
+    LifecycleState.RESTORING: frozenset(
+        {LifecycleState.INACTIVE, LifecycleState.ACTIVE, LifecycleState.ERROR}
+    ),
+    LifecycleState.ERROR: frozenset({LifecycleState.INACTIVE}),
+}
+
+
 class EvaluationOutcome(StrEnum):
-    """Read-only observation result for one evaluation cycle."""
+    """Per-cycle observation result for one contract."""
 
     DISABLED = "disabled"
     TARGET_NOT_FOUND = "target_not_found"
     TRIGGER_PENDING = "trigger_pending"
     WOULD_ACTIVATE = "would_activate"
+    ACTIVATED = "activated"
+    STILL_ACTIVE = "still_active"
+    RESTORED = "restored"
+    ACTIVATION_ERROR = "activation_error"
+    RESTORATION_ERROR = "restoration_error"
     EVALUATION_ERROR = "evaluation_error"
 
 
@@ -74,7 +96,7 @@ class DurationTracker:
 
 @dataclass
 class ContractRuntimeState:
-    """Transient per-contract state owned by the evaluation engine."""
+    """Transient per-contract state owned by the runtime engine."""
 
     contract_id: str
     lifecycle: LifecycleState = LifecycleState.INACTIVE
@@ -82,10 +104,39 @@ class ContractRuntimeState:
     restore_tracker: DurationTracker = field(default_factory=DurationTracker)
     last_outcome: EvaluationOutcome | None = None
     matched_pids: list[int] = field(default_factory=list)
+    snapshots: list[ResourceSnapshot] = field(default_factory=list)
+    activated_at: float | None = None
+    last_restore_raw: bool | None = None
+    last_restore_satisfied: bool | None = None
     last_error: str | None = None
     last_evaluated_monotonic: float | None = None
+
+    def transition_to(self, new_state: LifecycleState) -> None:
+        """Move lifecycle, rejecting anything outside the allowed map."""
+        allowed = _ALLOWED_TRANSITIONS[self.lifecycle]
+        if new_state not in allowed and new_state is not self.lifecycle:
+            raise LifecycleTransitionError(
+                f"contract {self.contract_id}: "
+                f"{self.lifecycle.value} -> {new_state.value} is not allowed"
+            )
+        self.lifecycle = new_state
 
     def note_evaluated(self, outcome: EvaluationOutcome, now: float | None = None) -> None:
         """Record that an evaluation cycle completed for this contract."""
         self.last_outcome = outcome
         self.last_evaluated_monotonic = now if now is not None else time.monotonic()
+
+    def clear_activation(self) -> None:
+        """Drop activation-specific state after a completed episode."""
+        self.snapshots = []
+        self.activated_at = None
+        self.last_restore_raw = None
+        self.last_restore_satisfied = None
+        self.trigger_tracker.reset()
+        self.restore_tracker.reset()
+
+    def reset_error(self) -> None:
+        """Manual recovery path: ERROR back to INACTIVE with timers cleared."""
+        self.lifecycle = LifecycleState.INACTIVE
+        self.last_error = None
+        self.clear_activation()

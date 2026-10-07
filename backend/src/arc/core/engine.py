@@ -1,27 +1,86 @@
-"""Read-only observation and evaluation engine.
+"""Persistent ARC runtime engine: monitor, evaluate, enforce, restore.
 
-The engine loads contracts, collects telemetry and process snapshots,
-resolves targets, and evaluates triggers while maintaining duration
-state across polling cycles. It never executes actions and never
-modifies the OS.
+The engine is the source of truth. It owns contracts, per-contract
+runtime state, the event history, and the latest snapshots. HTTP GET
+endpoints only read this state; they never drive enforcement.
 
-Nothing starts a loop on import. Callers drive ``poll()`` explicitly or
-await ``run_forever()``.
+One synchronous ``step()`` performs a full cycle under a short lock, so
+API reads never see half-mutated structures. The async loop only
+schedules steps. Nothing starts on import: callers use ``start()`` plus
+``run_forever()``, or drive ``step()`` directly in tests.
 """
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from arc.contracts.models import Contract
-from arc.core.lifecycle import ContractRuntimeState, EvaluationOutcome
-from arc.evaluation.service import ContractEvaluation, evaluate_contract
-from arc.monitoring.processes import ProcessObservation, sample_processes
+from arc.core.lifecycle import (
+    ContractRuntimeState,
+    EvaluationOutcome,
+    LifecycleState,
+)
+from arc.enforcement.service import activate_contract
+from arc.evaluation.service import (
+    ContractEvaluation,
+    evaluate_contract,
+    evaluate_restore,
+)
+from arc.linux.capabilities import PlatformCapabilities, detect_capabilities
+from arc.linux.psutil_adapter import LinuxResourceAdapter
+from arc.linux.resources import (
+    ProcessIdentity,
+    ProcessNotFoundError,
+    ResourceAdapter,
+    ResourceControlError,
+    ResourceSnapshot,
+)
+from arc.monitoring.processes import (
+    ProcessObservation,
+    resolve_process_target,
+    sample_processes,
+)
 from arc.monitoring.system import SystemMonitor, SystemSnapshot
+from arc.observability.events import ArcEvent, ArcEventType, EventLog
+from arc.restoration.service import restore_snapshots
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ContractStatusView:
+    """Copy of one contract plus its runtime state, safe to hand out."""
+
+    contract: Contract
+    lifecycle: LifecycleState
+    outcome: EvaluationOutcome | None
+    matched_pids: list[int]
+    active_identities: list[ProcessIdentity]
+    trigger_raw: bool | None
+    trigger_satisfied: bool | None
+    restore_raw: bool | None
+    restore_satisfied: bool | None
+    activated_at: float | None
+    last_error: str | None
+
+
+@dataclass(frozen=True)
+class EngineStatusView:
+    """Copy of engine health, safe to hand out."""
+
+    running: bool
+    platform: str
+    enforcement_supported: bool
+    euid: int | None
+    privileged_hint: bool | None
+    poll_interval_seconds: float
+    contract_count: int
+    active_contracts: int
+    error_contracts: int
+    event_count: int
 
 
 @dataclass
@@ -34,7 +93,7 @@ class EngineCycle:
 
 
 class ObservationEngine:
-    """Polls the system and evaluates contracts without enforcing."""
+    """Runs the full contract lifecycle without any HTTP involvement."""
 
     def __init__(
         self,
@@ -42,6 +101,7 @@ class ObservationEngine:
         poll_interval_seconds: float = 5.0,
         system_monitor: SystemMonitor | None = None,
         process_sampler: Callable[[], list[ProcessObservation]] | None = None,
+        resource_adapter: ResourceAdapter | None = None,
     ) -> None:
         if poll_interval_seconds <= 0:
             raise ValueError("poll_interval_seconds must be positive")
@@ -49,6 +109,13 @@ class ObservationEngine:
         self.poll_interval_seconds = poll_interval_seconds
         self._monitor = system_monitor or SystemMonitor()
         self._process_sampler = process_sampler or sample_processes
+        self._adapter = resource_adapter or LinuxResourceAdapter()
+        self._capabilities = detect_capabilities()
+        self._events = EventLog()
+        self._lock = threading.Lock()
+        self._running = False
+        self._latest_telemetry: SystemSnapshot | None = None
+        self._latest_observations: list[ProcessObservation] = []
         self._runtimes = {
             contract.id: ContractRuntimeState(contract_id=contract.id)
             for contract in self._contracts
@@ -63,9 +130,59 @@ class ObservationEngine:
         """Loaded contract definitions (configuration, not runtime state)."""
         return list(self._contracts)
 
+    @property
+    def capabilities(self) -> PlatformCapabilities:
+        """Platform and privilege report."""
+        return self._capabilities
+
     def runtime_for(self, contract_id: str) -> ContractRuntimeState | None:
         """Transient runtime state for one contract, if known."""
         return self._runtimes.get(contract_id)
+
+    def start(self) -> None:
+        """Mark the engine running and record the start event."""
+        with self._lock:
+            if self._running:
+                return
+            self._running = True
+            self._events.record(
+                ArcEventType.ENGINE_STARTED,
+                f"ARC engine started with {len(self._contracts)} contract(s), "
+                f"enforcement_supported={self._capabilities.enforcement_supported}",
+            )
+            logger.info("ARC engine started")
+
+    def reset_contract(self, contract_id: str) -> bool:
+        """Manually recover an ERROR contract back to INACTIVE."""
+        with self._lock:
+            runtime = self._runtimes.get(contract_id)
+            if runtime is None or runtime.lifecycle is not LifecycleState.ERROR:
+                return False
+            runtime.reset_error()
+            logger.info("contract %s manually reset to inactive", contract_id)
+            return True
+
+    def step(
+        self,
+        telemetry: SystemSnapshot | None = None,
+        observations: list[ProcessObservation] | None = None,
+        now: float | None = None,
+    ) -> EngineCycle:
+        """Run one full cycle: sample (unless injected), drive, cache."""
+        with self._lock:
+            live_telemetry = telemetry if telemetry is not None else self._monitor.sample()
+            live_observations = (
+                observations if observations is not None else self._process_sampler()
+            )
+            moment = now if now is not None else time.monotonic()
+            evaluations = self.evaluate_snapshot(live_telemetry, live_observations, moment)
+            self._latest_telemetry = live_telemetry
+            self._latest_observations = list(live_observations)
+            return EngineCycle(
+                telemetry=live_telemetry,
+                process_count=len(live_observations),
+                evaluations=evaluations,
+            )
 
     def evaluate_snapshot(
         self,
@@ -73,44 +190,494 @@ class ObservationEngine:
         observations: list[ProcessObservation],
         now: float,
     ) -> list[ContractEvaluation]:
-        """Evaluate all contracts against injected snapshots (test hook)."""
-        results: list[ContractEvaluation] = []
-        for contract in self._contracts:
-            runtime = self._runtimes[contract.id]
-            previous = runtime.last_outcome
-            result = evaluate_contract(contract, telemetry, observations, runtime, now)
-            self._log_transition(contract.id, previous, result)
-            results.append(result)
-        return results
-
-    def poll(self) -> EngineCycle:
-        """Collect one live snapshot and evaluate every contract."""
-        telemetry = self._monitor.sample()
-        observations = self._process_sampler()
-        now = time.monotonic()
-        evaluations = self.evaluate_snapshot(telemetry, observations, now)
-        return EngineCycle(
-            telemetry=telemetry,
-            process_count=len(observations),
-            evaluations=evaluations,
-        )
+        """Drive every contract one step. Caller must hold no assumptions."""
+        return [self._drive(contract, telemetry, observations, now) for contract in self._contracts]
 
     async def run_forever(self) -> None:
-        """Poll on ``poll_interval_seconds`` until cancelled."""
+        """Poll until ``shutdown()`` stops the loop. No lock held to sleep."""
         while True:
-            self.poll()
+            with self._lock:
+                running = self._running
+            if not running:
+                return
+            self.step()
             await asyncio.sleep(self.poll_interval_seconds)
 
-    def _log_transition(
+    def shutdown(self) -> list[str]:
+        """Stop the loop and best-effort restore every ACTIVE contract."""
+        with self._lock:
+            self._running = False
+            problems: list[str] = []
+            now = time.monotonic()
+            for contract in self._contracts:
+                runtime = self._runtimes[contract.id]
+                if runtime.lifecycle is not LifecycleState.ACTIVE:
+                    continue
+                error = self._settle_snapshots(contract, runtime, reason="engine shutdown", now=now)
+                if error is not None:
+                    problems.append(f"{contract.id}: {error}")
+            self._events.record(ArcEventType.ENGINE_STOPPED, "ARC engine stopped")
+            logger.info("ARC engine stopped")
+            return problems
+
+    def contract_statuses(self) -> list[ContractStatusView]:
+        """Copies of every contract plus runtime state."""
+        with self._lock:
+            return [self._status_view(contract) for contract in self._contracts]
+
+    def engine_status(self) -> EngineStatusView:
+        """Copy of engine health."""
+        with self._lock:
+            active = sum(
+                1
+                for runtime in self._runtimes.values()
+                if runtime.lifecycle is LifecycleState.ACTIVE
+            )
+            errored = sum(
+                1
+                for runtime in self._runtimes.values()
+                if runtime.lifecycle is LifecycleState.ERROR
+            )
+            return EngineStatusView(
+                running=self._running,
+                platform=self._capabilities.platform,
+                enforcement_supported=self._capabilities.enforcement_supported,
+                euid=self._capabilities.euid,
+                privileged_hint=self._capabilities.privileged_hint,
+                poll_interval_seconds=self.poll_interval_seconds,
+                contract_count=len(self._contracts),
+                active_contracts=active,
+                error_contracts=errored,
+                event_count=len(self._events),
+            )
+
+    def recent_events(self, limit: int = 100) -> list[ArcEvent]:
+        """Newest-first event history slice."""
+        return self._events.recent(limit)
+
+    def latest_telemetry(self) -> SystemSnapshot | None:
+        """Last sampled telemetry, or None before the first step."""
+        with self._lock:
+            return self._latest_telemetry
+
+    def latest_observations(self) -> list[ProcessObservation]:
+        """Copy of the last process snapshot."""
+        with self._lock:
+            return list(self._latest_observations)
+
+    def _status_view(self, contract: Contract) -> ContractStatusView:
+        runtime = self._runtimes[contract.id]
+        evaluation = self._last_evaluation(contract, runtime)
+        return ContractStatusView(
+            contract=contract,
+            lifecycle=runtime.lifecycle,
+            outcome=runtime.last_outcome,
+            matched_pids=list(runtime.matched_pids),
+            active_identities=[snap.identity for snap in runtime.snapshots],
+            trigger_raw=evaluation.trigger_raw if evaluation else None,
+            trigger_satisfied=evaluation.trigger_satisfied if evaluation else None,
+            restore_raw=runtime.last_restore_raw,
+            restore_satisfied=runtime.last_restore_satisfied,
+            activated_at=runtime.activated_at,
+            last_error=runtime.last_error,
+        )
+
+    def _last_evaluation(
+        self, contract: Contract, runtime: ContractRuntimeState
+    ) -> ContractEvaluation | None:
+        if runtime.last_outcome is None:
+            return None
+        return ContractEvaluation(contract_id=contract.id, outcome=runtime.last_outcome)
+
+    def _drive(
+        self,
+        contract: Contract,
+        telemetry: SystemSnapshot,
+        observations: list[ProcessObservation],
+        now: float,
+    ) -> ContractEvaluation:
+        runtime = self._runtimes[contract.id]
+        if runtime.lifecycle is LifecycleState.ERROR:
+            return ContractEvaluation(
+                contract_id=contract.id,
+                outcome=runtime.last_outcome or EvaluationOutcome.EVALUATION_ERROR,
+                lifecycle=LifecycleState.ERROR,
+                matched_pids=list(runtime.matched_pids),
+                detail="error latched, awaiting manual reset or restart",
+                error=runtime.last_error,
+            )
+        if runtime.lifecycle is LifecycleState.ACTIVE:
+            return self._drive_active(contract, runtime, telemetry, observations, now)
+        previous = runtime.last_outcome
+        result = evaluate_contract(contract, telemetry, observations, runtime, now)
+        result.lifecycle = runtime.lifecycle
+        if result.outcome is EvaluationOutcome.WOULD_ACTIVATE:
+            if self._adapter.enforcement_supported:
+                return self._try_activate(contract, runtime, observations, now)
+            self._emit_on_change(
+                contract.id, previous, result, ArcEventType.CONTRACT_TRIGGER_PENDING
+            )
+            return result
+        if result.outcome is EvaluationOutcome.TRIGGER_PENDING:
+            self._emit_on_change(
+                contract.id, previous, result, ArcEventType.CONTRACT_TRIGGER_PENDING
+            )
+        return result
+
+    def _try_activate(
+        self,
+        contract: Contract,
+        runtime: ContractRuntimeState,
+        observations: list[ProcessObservation],
+        now: float,
+    ) -> ContractEvaluation:
+        by_pid = {obs.pid: obs for obs in observations}
+        matched = [by_pid[pid] for pid in runtime.matched_pids if pid in by_pid]
+        runtime.transition_to(LifecycleState.ACTIVATING)
+        self._events.record(
+            ArcEventType.CONTRACT_ACTIVATING,
+            f"contract {contract.id} activating for pids {[obs.pid for obs in matched]}",
+            contract_id=contract.id,
+        )
+        try:
+            result = activate_contract(contract, matched, self._adapter)
+        except Exception as exc:
+            logger.exception("contract %s activation crashed", contract.id)
+            result = None
+            crash = f"activation crashed: {exc}"
+        if result is not None and result.ok:
+            runtime.snapshots = list(result.snapshots)
+            runtime.activated_at = time.time()
+            runtime.transition_to(LifecycleState.ACTIVE)
+            for snapshot in result.snapshots:
+                self._events.record(
+                    ArcEventType.RESOURCE_SNAPSHOT_CAPTURED,
+                    f"snapshot captured for pid {snapshot.identity.pid}",
+                    contract_id=contract.id,
+                    pid=snapshot.identity.pid,
+                )
+            for op in result.applied:
+                self._events.record(
+                    ArcEventType.RESOURCE_ACTION_APPLIED,
+                    f"{op.kind}={op.requested} applied to pid {op.pid}",
+                    contract_id=contract.id,
+                    pid=op.pid,
+                )
+            self._events.record(
+                ArcEventType.CONTRACT_ACTIVATED,
+                f"contract {contract.id} active on {len(result.snapshots)} process(es)",
+                contract_id=contract.id,
+            )
+            runtime.note_evaluated(EvaluationOutcome.ACTIVATED, now)
+            return ContractEvaluation(
+                contract_id=contract.id,
+                outcome=EvaluationOutcome.ACTIVATED,
+                lifecycle=LifecycleState.ACTIVE,
+                trigger_raw=True,
+                trigger_satisfied=True,
+                matched_pids=list(runtime.matched_pids),
+                detail=f"enforced on {len(result.snapshots)} process(es)",
+            )
+        if result is None:
+            error = crash
+            rollback_errors: list[str] = []
+        else:
+            error = result.failure.error if result.failure else "activation failed"
+            rollback_errors = result.failure.rollback_errors if result.failure else []
+        runtime.transition_to(LifecycleState.ERROR)
+        runtime.last_error = error
+        self._events.record(
+            ArcEventType.ENFORCEMENT_FAILED,
+            f"contract {contract.id} activation failed: {error}",
+            severity="error",
+            contract_id=contract.id,
+        )
+        if rollback_errors:
+            self._events.record(
+                ArcEventType.ROLLBACK_FAILED,
+                f"contract {contract.id} rollback incomplete: {'; '.join(rollback_errors)}",
+                severity="error",
+                contract_id=contract.id,
+            )
+        else:
+            self._events.record(
+                ArcEventType.ROLLBACK_COMPLETED,
+                f"contract {contract.id} rolled back cleanly",
+                contract_id=contract.id,
+            )
+        runtime.note_evaluated(EvaluationOutcome.ACTIVATION_ERROR, now)
+        return ContractEvaluation(
+            contract_id=contract.id,
+            outcome=EvaluationOutcome.ACTIVATION_ERROR,
+            lifecycle=LifecycleState.ERROR,
+            matched_pids=list(runtime.matched_pids),
+            detail=error,
+            error=error,
+        )
+
+    def _drive_active(
+        self,
+        contract: Contract,
+        runtime: ContractRuntimeState,
+        telemetry: SystemSnapshot,
+        observations: list[ProcessObservation],
+        now: float,
+    ) -> ContractEvaluation:
+        matched = resolve_process_target(contract.target, observations)
+        runtime.matched_pids = [obs.pid for obs in matched]
+        live, _, stale, unchecked = self._check_snapshots(runtime.snapshots)
+        if stale or unchecked or not live:
+            error = self._settle_snapshots(contract, runtime, reason="targets changed", now=now)
+            if error is None:
+                runtime.note_evaluated(EvaluationOutcome.RESTORED, now)
+                return ContractEvaluation(
+                    contract_id=contract.id,
+                    outcome=EvaluationOutcome.RESTORED,
+                    lifecycle=LifecycleState.INACTIVE,
+                    matched_pids=list(runtime.matched_pids),
+                    detail="activation retired with nothing left to restore",
+                )
+            runtime.note_evaluated(EvaluationOutcome.RESTORATION_ERROR, now)
+            return ContractEvaluation(
+                contract_id=contract.id,
+                outcome=EvaluationOutcome.RESTORATION_ERROR,
+                lifecycle=LifecycleState.ERROR,
+                matched_pids=list(runtime.matched_pids),
+                detail=error,
+                error=error,
+            )
+        restore = evaluate_restore(contract, telemetry, matched, runtime, now)
+        if not restore.satisfied:
+            evaluation = ContractEvaluation(
+                contract_id=contract.id,
+                outcome=EvaluationOutcome.STILL_ACTIVE,
+                lifecycle=LifecycleState.ACTIVE,
+                matched_pids=list(runtime.matched_pids),
+                restore_raw=restore.raw,
+                restore_satisfied=False,
+                detail=(
+                    f"restore pending ({restore.elapsed_seconds:.1f}s of "
+                    f"{restore.required_seconds:.1f}s)"
+                ),
+            )
+            self._emit_on_change(
+                contract.id, runtime.last_outcome, evaluation, ArcEventType.RESTORE_PENDING
+            )
+            runtime.note_evaluated(EvaluationOutcome.STILL_ACTIVE, now)
+            return evaluation
+        error = self._settle_snapshots(contract, runtime, reason="restore satisfied", now=now)
+        if error is None:
+            runtime.note_evaluated(EvaluationOutcome.RESTORED, now)
+            return ContractEvaluation(
+                contract_id=contract.id,
+                outcome=EvaluationOutcome.RESTORED,
+                lifecycle=LifecycleState.INACTIVE,
+                matched_pids=list(runtime.matched_pids),
+                restore_raw=True,
+                restore_satisfied=True,
+                detail="exact prior state restored and verified",
+            )
+        runtime.note_evaluated(EvaluationOutcome.RESTORATION_ERROR, now)
+        return ContractEvaluation(
+            contract_id=contract.id,
+            outcome=EvaluationOutcome.RESTORATION_ERROR,
+            lifecycle=LifecycleState.ERROR,
+            matched_pids=list(runtime.matched_pids),
+            detail=error,
+            error=error,
+        )
+
+    def _settle_snapshots(
+        self,
+        contract: Contract,
+        runtime: ContractRuntimeState,
+        reason: str,
+        now: float,
+    ) -> str | None:
+        """Restore live snapshots, retire exits, fail on stale identities."""
+        live, gone, stale, unchecked = self._check_snapshots(runtime.snapshots)
+        for pid in gone:
+            self._events.record(
+                ArcEventType.TARGET_DISAPPEARED,
+                f"target pid {pid} exited while contract {contract.id} active",
+                contract_id=contract.id,
+                pid=pid,
+            )
+        if stale or unchecked:
+            self._fail_stale_restore(contract, runtime, live, stale, unchecked, now)
+            return runtime.last_error or "identity verification failed"
+        if not live:
+            runtime.snapshots = []
+            runtime.clear_activation()
+            runtime.transition_to(LifecycleState.RESTORING)
+            runtime.transition_to(LifecycleState.INACTIVE)
+            self._events.record(
+                ArcEventType.CONTRACT_RESTORING,
+                f"contract {contract.id} restoring ({reason})",
+                contract_id=contract.id,
+            )
+            self._events.record(
+                ArcEventType.CONTRACT_RESTORED,
+                f"contract {contract.id} retired with nothing to restore",
+                contract_id=contract.id,
+            )
+            return None
+        return self._restore_active(contract, runtime, live, reason=reason)
+
+    def _check_snapshots(
+        self, snapshots: list[ResourceSnapshot]
+    ) -> tuple[list[ResourceSnapshot], list[int], list[int], list[str]]:
+        """Sort snapshots into live, exited, reused-PID, and unverifiable."""
+        live: list[ResourceSnapshot] = []
+        gone: list[int] = []
+        stale: list[int] = []
+        unchecked: list[str] = []
+        for snapshot in snapshots:
+            pid = snapshot.identity.pid
+            try:
+                current = self._adapter.get_identity(pid)
+            except ProcessNotFoundError:
+                gone.append(pid)
+                continue
+            except ResourceControlError as exc:
+                unchecked.append(f"pid {pid}: {exc.detail}")
+                continue
+            if current.create_time != snapshot.identity.create_time:
+                logger.error(
+                    "pid %s reused by a new process lifetime, refusing restoration",
+                    pid,
+                )
+                stale.append(pid)
+            else:
+                live.append(snapshot)
+        return live, gone, stale, unchecked
+
+    def _fail_stale_restore(
+        self,
+        contract: Contract,
+        runtime: ContractRuntimeState,
+        live: list[ResourceSnapshot],
+        stale: list[int],
+        unchecked: list[str],
+        now: float,
+    ) -> ContractEvaluation:
+        """Restore what is still safe, then ERROR on the unverifiable rest."""
+        runtime.transition_to(LifecycleState.RESTORING)
+        self._events.record(
+            ArcEventType.CONTRACT_RESTORING,
+            f"contract {contract.id} restoring (identity check failed)",
+            contract_id=contract.id,
+        )
+        restored_note = "no live snapshots to restore"
+        if live:
+            try:
+                result = restore_snapshots(live, self._adapter)
+            except Exception as exc:
+                logger.exception("contract %s restoration crashed", contract.id)
+                result = None
+                crash = f"restoration crashed: {exc}"
+            if result is not None:
+                for entry_pid in result.restored:
+                    self._events.record(
+                        ArcEventType.RESOURCE_RESTORED,
+                        f"pid {entry_pid} restored to exact prior state",
+                        contract_id=contract.id,
+                        pid=entry_pid,
+                    )
+                restored_note = f"restored {len(result.restored)} of {len(live)} live snapshot(s)"
+                if not result.ok:
+                    restored_note += "; live restore had failures"
+            else:
+                restored_note = crash
+        runtime.transition_to(LifecycleState.ERROR)
+        problems = [f"reused PID left untouched: {stale}" if stale else ""]
+        problems.extend(unchecked)
+        joined = "; ".join(part for part in problems if part)
+        error = f"identity verification failed ({restored_note}): {joined}"
+        runtime.last_error = error
+        self._events.record(
+            ArcEventType.RESTORATION_FAILED,
+            f"contract {contract.id}: {error}",
+            severity="error",
+            contract_id=contract.id,
+        )
+        runtime.note_evaluated(EvaluationOutcome.RESTORATION_ERROR, now)
+        return ContractEvaluation(
+            contract_id=contract.id,
+            outcome=EvaluationOutcome.RESTORATION_ERROR,
+            lifecycle=LifecycleState.ERROR,
+            detail=error,
+            error=error,
+        )
+
+    def _restore_active(
+        self,
+        contract: Contract,
+        runtime: ContractRuntimeState,
+        live_snapshots: list[ResourceSnapshot],
+        reason: str,
+    ) -> str | None:
+        """Restore verified snapshots. Returns error text or None on success."""
+        runtime.transition_to(LifecycleState.RESTORING)
+        self._events.record(
+            ArcEventType.CONTRACT_RESTORING,
+            f"contract {contract.id} restoring ({reason})",
+            contract_id=contract.id,
+        )
+        try:
+            result = restore_snapshots(live_snapshots, self._adapter)
+        except Exception as exc:
+            logger.exception("contract %s restoration crashed", contract.id)
+            runtime.transition_to(LifecycleState.ERROR)
+            error = f"restoration crashed: {exc}"
+            runtime.last_error = error
+            self._events.record(
+                ArcEventType.RESTORATION_FAILED,
+                f"contract {contract.id}: {error}",
+                severity="error",
+                contract_id=contract.id,
+            )
+            return error
+        for entry_pid in result.restored:
+            self._events.record(
+                ArcEventType.RESOURCE_RESTORED,
+                f"pid {entry_pid} restored to exact prior state",
+                contract_id=contract.id,
+                pid=entry_pid,
+            )
+        if result.ok:
+            runtime.clear_activation()
+            runtime.transition_to(LifecycleState.INACTIVE)
+            self._events.record(
+                ArcEventType.CONTRACT_RESTORED,
+                f"contract {contract.id} restored, back to inactive",
+                contract_id=contract.id,
+            )
+            return None
+        problems = [
+            f"pid {entry.pid} {entry.status}: {entry.detail}"
+            for entry in result.entries
+            if entry.status in ("failed", "stale")
+        ]
+        runtime.transition_to(LifecycleState.ERROR)
+        error = f"restoration incomplete: {'; '.join(problems)}"
+        runtime.last_error = error
+        self._events.record(
+            ArcEventType.RESTORATION_FAILED,
+            f"contract {contract.id}: {error}",
+            severity="error",
+            contract_id=contract.id,
+        )
+        return error
+
+    def _emit_on_change(
         self,
         contract_id: str,
         previous: EvaluationOutcome | None,
-        result: ContractEvaluation,
+        evaluation: ContractEvaluation,
+        event_type: ArcEventType,
     ) -> None:
-        changed = previous != result.outcome
-        if result.outcome is EvaluationOutcome.WOULD_ACTIVATE and changed:
-            logger.info("contract %s trigger satisfied: %s", contract_id, result.detail)
-        elif result.outcome is EvaluationOutcome.EVALUATION_ERROR and changed:
-            logger.warning("contract %s evaluation error: %s", contract_id, result.error)
-        elif changed:
-            logger.debug("contract %s: %s", contract_id, result.detail)
+        if previous != evaluation.outcome:
+            message = f"contract {contract_id}: {evaluation.detail}"
+            self._events.record(event_type, message, contract_id=contract_id)
+        logger.debug("contract %s: %s", contract_id, evaluation.detail)
