@@ -1,14 +1,3 @@
-export interface HealthState {
-  app: string;
-  status: string;
-  platform: string;
-  engine_running: boolean;
-  enforcement_supported: boolean;
-  contract_count: number;
-  active_contracts: number;
-  error_contracts: number;
-}
-
 export interface EngineStatus {
   running: boolean;
   platform: string;
@@ -88,6 +77,8 @@ export interface ContractStatus {
   restore_satisfied?: boolean | null;
   activated_at?: number | null;
   last_error?: string | null;
+  trigger_elapsed_seconds?: number | null;
+  restore_elapsed_seconds?: number | null;
 }
 
 export interface ProcessItem {
@@ -132,5 +123,6 @@ export interface WebSocketMessage {
     severity: string;
     message: string;
     contract_id?: string | null;
+    pid?: number | null;
   }>;
 }

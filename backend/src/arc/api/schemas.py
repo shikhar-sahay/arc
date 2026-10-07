@@ -130,7 +130,9 @@ class ContractStatus(BaseModel):
     restore_satisfied: bool | None = None
     activated_at: float | None = None
     detail: str = ""
-    error: str | None = None
+    last_error: str | None = None
+    trigger_elapsed_seconds: float | None = None
+    restore_elapsed_seconds: float | None = None
 
 
 class ContractLoadIssue(BaseModel):

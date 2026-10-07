@@ -315,6 +315,8 @@ def create_app(
                 restore_satisfied=view.restore_satisfied,
                 activated_at=view.activated_at,
                 last_error=view.last_error,
+                trigger_elapsed_seconds=view.trigger_elapsed_seconds,
+                restore_elapsed_seconds=view.restore_elapsed_seconds,
             )
             for view in engine.contract_statuses()
         ]
@@ -357,6 +359,9 @@ def create_app(
             lifecycle=view.lifecycle,
             outcome=view.outcome,
             matched_pids=view.matched_pids,
+            last_error=view.last_error,
+            trigger_elapsed_seconds=view.trigger_elapsed_seconds,
+            restore_elapsed_seconds=view.restore_elapsed_seconds,
         )
 
     @app.put("/api/contracts/{contract_id}", response_model=ContractStatus)
@@ -401,6 +406,9 @@ def create_app(
             lifecycle=view.lifecycle,
             outcome=view.outcome,
             matched_pids=view.matched_pids,
+            last_error=view.last_error,
+            trigger_elapsed_seconds=view.trigger_elapsed_seconds,
+            restore_elapsed_seconds=view.restore_elapsed_seconds,
         )
 
     @app.delete("/api/contracts/{contract_id}")
@@ -460,6 +468,9 @@ def create_app(
             lifecycle=view.lifecycle,
             outcome=view.outcome,
             matched_pids=view.matched_pids,
+            last_error=view.last_error,
+            trigger_elapsed_seconds=view.trigger_elapsed_seconds,
+            restore_elapsed_seconds=view.restore_elapsed_seconds,
         )
 
     @app.post("/api/contracts/{contract_id}/reset")

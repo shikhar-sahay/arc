@@ -66,6 +66,8 @@ class ContractStatusView:
     restore_satisfied: bool | None
     activated_at: float | None
     last_error: str | None
+    trigger_elapsed_seconds: float | None
+    restore_elapsed_seconds: float | None
 
 
 @dataclass(frozen=True)
@@ -374,6 +376,13 @@ class ObservationEngine:
     def _status_view(self, contract: Contract) -> ContractStatusView:
         runtime = self._runtimes[contract.id]
         evaluation = self._last_evaluation(contract, runtime)
+        now_mono = time.monotonic()
+        trigger_elapsed: float | None = None
+        restore_elapsed: float | None = None
+        if runtime.trigger_tracker.satisfied_since is not None:
+            trigger_elapsed = runtime.trigger_tracker.elapsed(now_mono)
+        if runtime.restore_tracker.satisfied_since is not None:
+            restore_elapsed = runtime.restore_tracker.elapsed(now_mono)
         return ContractStatusView(
             contract=contract,
             lifecycle=runtime.lifecycle,
@@ -386,6 +395,8 @@ class ObservationEngine:
             restore_satisfied=runtime.last_restore_satisfied,
             activated_at=runtime.activated_at,
             last_error=runtime.last_error,
+            trigger_elapsed_seconds=trigger_elapsed,
+            restore_elapsed_seconds=restore_elapsed,
         )
 
     def _last_evaluation(
