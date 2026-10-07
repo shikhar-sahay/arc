@@ -40,6 +40,8 @@ class EngineStatusResponse(BaseModel):
     active_contracts: int
     error_contracts: int
     event_count: int
+    cgroup_available: bool = False
+    cgroup_reason: str = ""
 
 
 class SystemResponse(BaseModel):
@@ -69,9 +71,20 @@ class ProcessResponse(BaseModel):
     cmdline: str | None
     cpu_percent: float | None
     memory_percent: float | None
+    nice: int | None = None
+    cpu_affinity: list[int] | None = None
+    arc_managed: bool = False
+    active_contract_ids: list[str] = Field(default_factory=list)
 
     @classmethod
-    def from_observation(cls, observation: ProcessObservation) -> "ProcessResponse":
+    def from_observation(
+        cls,
+        observation: ProcessObservation,
+        nice: int | None = None,
+        cpu_affinity: list[int] | None = None,
+        arc_managed: bool = False,
+        active_contract_ids: list[str] | None = None,
+    ) -> "ProcessResponse":
         """Build a response from a domain observation."""
         return cls(
             pid=observation.pid,
@@ -79,6 +92,10 @@ class ProcessResponse(BaseModel):
             cmdline=observation.cmdline,
             cpu_percent=observation.cpu_percent,
             memory_percent=observation.memory_percent,
+            nice=nice,
+            cpu_affinity=cpu_affinity,
+            arc_managed=arc_managed,
+            active_contract_ids=active_contract_ids or [],
         )
 
 
