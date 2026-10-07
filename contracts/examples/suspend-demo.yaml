@@ -1,0 +1,30 @@
+# Example contract (documentation only, not a live policy).
+#
+# Files in contracts/examples/ are never loaded automatically. Copy a file
+# to contracts/ (the directory root, not a subdirectory) to make it live.
+# Suspends the target process via SIGSTOP and restores it via SIGCONT.
+version: 1
+id: suspend-demo
+name: Background Worker Suspension
+description: >
+  When system CPU pressure exceeds 80 percent continuously, suspend the background
+  worker to yield resources immediately. When pressure drops below 40 percent,
+  restore the worker to running state.
+enabled: true
+target:
+  type: process
+  match:
+    executable: python
+    command_contains: demo_cpu_worker
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 80
+  for_seconds: 3
+actions:
+  - type: suspend
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 40
+  for_seconds: 3

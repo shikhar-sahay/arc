@@ -1,0 +1,31 @@
+# Example contract (documentation only, not a live policy).
+#
+# Files in contracts/examples/ are never loaded automatically. Copy a file
+# to contracts/ (the directory root, not a subdirectory) to make it live.
+# Constrains the demo worker process to a specific core (e.g. CPU core 0).
+version: 1
+id: affinity-demo
+name: CPU Affinity Constraint
+description: >
+  When system CPU usage exceeds 70 percent, restrict the background worker
+  process to CPU core 0. When CPU usage subsides, restore prior CPU affinity.
+enabled: true
+target:
+  type: process
+  match:
+    executable: python
+    command_contains: demo_cpu_worker
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 70
+  for_seconds: 4
+actions:
+  - type: cpu_affinity
+    cpus:
+      - 0
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 50
+  for_seconds: 4

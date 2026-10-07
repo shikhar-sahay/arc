@@ -5,8 +5,8 @@ schema. Contracts are declarative configuration loaded from YAML. Runtime
 state (matched PIDs, duration timers, evaluation results) lives in
 ``arc.core.lifecycle`` and is never written back into YAML files.
 
-Action models in this file describe intent only. No code in this pass
-executes resource actions.
+Action models describe intent. Execution lives behind the
+``arc.linux`` adapter boundary and the enforcement service.
 """
 
 from enum import StrEnum
@@ -120,7 +120,7 @@ class Condition(BaseModel):
 
 
 class NiceAction(BaseModel):
-    """Intent to adjust a process nice value. Not executed in this pass."""
+    """Adjust a process nice value (executed on Linux)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -129,7 +129,7 @@ class NiceAction(BaseModel):
 
 
 class CpuAffinityAction(BaseModel):
-    """Intent to constrain process CPUs. Not executed in this pass."""
+    """Constrain process CPUs (executed on Linux)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -148,7 +148,7 @@ class CpuAffinityAction(BaseModel):
 
 
 class SuspendAction(BaseModel):
-    """Intent to suspend a process. Not executed in this pass."""
+    """Suspend a process with SIGSTOP (executed on Linux)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -156,15 +156,28 @@ class SuspendAction(BaseModel):
 
 
 class ResumeAction(BaseModel):
-    """Intent to resume a process. Not executed in this pass."""
+    """Resume a process with SIGCONT (executed on Linux)."""
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["resume"] = "resume"
 
 
+class CpuQuotaAction(BaseModel):
+    """Intent to cap a process CPU share via cgroups v2 cpu.max.
+
+    ``quota_percent`` maps to ``<quota> 100000`` in cpu.max, so 50.0
+    means half of one CPU per period. Range is 1 to 100.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["cpu_quota"] = "cpu_quota"
+    quota_percent: float = Field(ge=1, le=100)
+
+
 Action = Annotated[
-    NiceAction | CpuAffinityAction | SuspendAction | ResumeAction,
+    NiceAction | CpuAffinityAction | SuspendAction | ResumeAction | CpuQuotaAction,
     Field(discriminator="type"),
 ]
 
@@ -174,7 +187,7 @@ class Contract(BaseModel):
 
     The ``restore`` field is a restoration CONDITION (when the contract
     should stop applying). It is not a snapshot of resource state.
-    Snapshots and restoration execution belong to the enforcement pass.
+    Snapshots are captured at activation and restored exactly.
     """
 
     model_config = ConfigDict(extra="forbid")
