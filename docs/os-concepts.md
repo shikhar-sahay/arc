@@ -42,9 +42,11 @@ activation explicitly instead of being silently masked.
 
 Control groups organize processes into hierarchies and provide kernel
 mechanisms for accounting and limiting resources such as CPU, memory, and
-I/O. Selected cgroups v2 controllers (for example `cpu` weight and limits)
-are candidates for later ARC actions. ARC will use these interfaces, not
-reimplement them.
+I/O. ARC interfaces with cgroups v2 via `cpu.max` quota leases under a
+dedicated slice (`arc.slice`), attaching target PIDs to managed groups
+during activation and removing quotas upon contract restoration. When
+cgroups v2 hierarchy is not writable or unavailable, ARC reports this
+capability status transparently without faking support.
 
 ## 5. /proc and runtime observation
 
@@ -59,10 +61,12 @@ over these snapshots without mutating anything.
 ## 6. Signals and process control
 
 POSIX signals let one process notify another (terminate, suspend with
-`SIGSTOP`, resume with `SIGCONT`, or handle custom notifications). Signals
-are asynchronous and easy to misuse, so any future ARC use needs explicit
-semantics: which signal, to which process, under which contract, with what
-logged outcome.
+`SIGSTOP`, resume with `SIGCONT`, or handle custom notifications). ARC
+implements `suspend` and `resume` contract actions using standard POSIX
+signals (`SIGSTOP` and `SIGCONT`). Process status is snapshotted prior to
+mutation, ensuring that restoration only resumes processes that were
+running beforehand, and self-protection guards prevent the engine from
+signaling itself or its parent.
 
 ## 7. Concurrency
 

@@ -98,20 +98,28 @@ activate while CPU stays above 75 percent for 5 seconds, and restore
 once CPU stays below 55 percent for 5 seconds. A single threshold would
 flap when usage hovers near it. Two thresholds keep the episode stable.
 
-## Actions (nice and cpu_affinity execute on Linux)
+## Actions (nice, cpu_affinity, suspend, resume, cpu_quota)
 
 - `nice`: `{type: nice, value: 10}`. Value must fit the Linux nice range
-  of -20 to 19. Executed for real on Linux: the engine snapshots the
+  of -20 to 19. Executed on Linux: the engine snapshots the
   current value, sets the new one, and reads it back to verify.
 - `cpu_affinity`: `{type: cpu_affinity, cpus: [0, 1]}`. The list must be
-  non-empty, with unique non-negative CPU indexes. Executed for real on
+  non-empty, with unique non-negative CPU indexes. Executed on
   Linux with read-back verification. Invalid or disallowed CPUs fail
-  activation explicitly. Check your host topology before using static
+  activation explicitly. Check host topology before using static
   CPU lists.
-- `suspend`: `{type: suspend}`. Validated but NOT executed yet. Any
-  contract containing it fails activation with an explicit unsupported
-  action error before anything is modified.
-- `resume`: `{type: resume}`. Same status as `suspend`.
+- `suspend`: `{type: suspend}`. Suspends target processes via SIGSTOP.
+  Snapshots prior stopped/running status. If the process was running
+  before ARC suspended it, restoration resumes it via SIGCONT. If the
+  process was already stopped prior to ARC mutation, restoration preserves
+  that stopped state. Self-protection prevents the engine from targeting
+  itself or its parent process.
+- `resume`: `{type: resume}`. Resumes stopped target processes via SIGCONT.
+  Snapshots prior stopped/running status. If the target was originally
+  stopped, restoration restores that stopped state via SIGSTOP.
+- `cpu_quota`: `{type: cpu_quota, quota_percent: 50.0}`. Allocates a CPU quota
+  lease via cgroups v2 (`cpu.max`). Supported when cgroup v2 hierarchy is
+  mounted with the `cpu` controller enabled.
 
 Malformed actions fail validation with a clear error. Actions apply in
 contract order, and multi-process targets are visited in PID order, so
