@@ -82,3 +82,19 @@ needing the full project brief restated.
   never real sleeping.
 - Preview evaluation (`would_activate`) must never be reported, logged,
   or displayed as successful enforcement.
+
+## Domain rules from the enforcement pass
+
+- HTTP GET must never trigger enforcement. Endpoints read cached engine
+  state only.
+- PID alone is insufficient process identity. Snapshots pin PID plus
+  creation time, and restoration re-verifies both.
+- Resource state must be snapshotted before mutation, and restored
+  values must be read back and verified.
+- Partial activation must roll back in reverse journal order. Clean
+  versus incomplete rollback is recorded explicitly.
+- Errored contracts latch and never retry on their own. Recovery is
+  manual reset or restart.
+- Graceful engine shutdown must attempt restoration of ACTIVE contracts.
+- Agents must never bypass Linux permission semantics: no sudo, no
+  shell-outs for what process APIs do, denials fail closed and loud.

@@ -1,9 +1,9 @@
 # ARCHITECTURE.md
 
 Authoritative technical architecture for ARC (Adaptive Resource Contract
-Engine). The read-only engine (contract model, monitoring, evaluation,
-preview) is implemented. Enforcement and restoration execution are the
-next layer and remain planned.
+Engine). The contract lifecycle through enforcement and restoration is
+implemented for nice values and CPU affinity on Linux. cgroups and
+suspend/resume execution remain planned.
 
 ## Architectural goals
 
@@ -26,11 +26,12 @@ next layer and remain planned.
    `evaluation`, `enforcement`, `restoration`, `observability`): contract
    models, event detection, evaluation, lifecycle, enforcement
    orchestration, restoration, and observability.
-4. **Linux Integration** (psutil-based read-only observation now;
-   enforcement adapters for nice values, CPU affinity, signals, and
-   selected cgroups v2 controls to be added): telemetry collectors and
-   process readers today, resource mutation adapters in the enforcement
-   pass.
+4. **Linux Integration** (`backend/src/arc/linux`): the only layer
+   that names OS resource operations. psutil-based read-only observation
+   plus a `ResourceAdapter` protocol with a real Linux implementation
+   (nice and affinity) and an in-memory fake for tests. Enforcement
+   adapters for signals and selected cgroups v2 controls are still to
+   be added.
 5. **Linux Processes and Resources**: the OS-level entities ARC observes
    and acts on.
 
@@ -48,24 +49,26 @@ Dependencies point downward only. The web layer never calls Linux
 integration directly, and the API layer never embeds evaluation or
 enforcement policy.
 
-## ARC Core modules (implemented read-only parts)
+## ARC Core modules (enforcement implemented for nice/affinity)
 
-- `core/`: lifecycle states, preview outcomes, duration trackers,
-  per-contract runtime state, and the observation engine loop.
+- `core/`: lifecycle states with enforced transitions, per-contract
+  runtime state, and the persistent runtime engine loop.
 - `contracts/`: authoritative contract models and YAML loading.
 - `monitoring/`: read-only system telemetry and process observation
   plus process target resolution, all built on psutil.
-- `evaluation/`: trigger condition evaluation and the read-only
-  contract evaluation service. Independent of FastAPI.
-- `enforcement/`: reserved for the enforcement pass. No execution code
-  exists here yet.
-- `restoration/`: reserved for snapshot storage and restoration
-  execution. Only the restore CONDITION model exists so far.
-- `observability/`: Python logging plus typed evaluation results. No
-  event bus.
-- `api/`: FastAPI read-only interface (health, system, contracts,
-  processes).
-- `cli/`: read-only helpers, currently contract validation.
+- `evaluation/`: trigger and restore condition evaluation.
+  Independent of FastAPI.
+- `enforcement/`: transaction-like activation (snapshot all, apply in
+  contract order and PID order, verify each, roll back on failure).
+- `restoration/`: exact snapshot restoration with identity checks and
+  read-back verification.
+- `linux/`: `ResourceAdapter` protocol, real Linux implementation,
+  in-memory fake for tests, platform capability reporting.
+- `observability/`: bounded in-memory event history plus logging.
+  No event bus.
+- `api/`: FastAPI interface that only reads engine state (health,
+  status, system, contracts, processes, events).
+- `cli/`: contract validation plus the headless `arc run` engine.
 
 Core must stay headless-capable: anything the web UI can do should also be
 possible without it.
@@ -98,16 +101,42 @@ timestamps instead of sleeping. Trigger and restore conditions are
 separate so episodes use hysteresis (activate above 75, restore below
 55) instead of flapping around one threshold.
 
-## Preview versus enforcement lifecycle
+## Persistent runtime engine
 
-The authoritative lifecycle (`inactive`, `activating`, `active`,
-`restoring`, `error`) will be driven by real enforcement later. The
-read-only evaluator must not claim it. Satisfied triggers therefore
-yield `would_activate`, an explicit preview outcome, while the lifecycle
-stays `inactive`. Preview results must never be logged or displayed as
-successful enforcement. The `ACTIVE` transition will be wired to
-successful action application, and `RESTORING` to real state restoration,
-in the enforcement pass.
+`ObservationEngine` is the source of truth. It owns contracts, runtime
+state, the event log, and the latest snapshots. One synchronous step
+performs a full cycle (sample, resolve, evaluate, enforce, restore)
+under a short lock; an async loop only schedules steps and never holds
+the lock across sleeps. HTTP GET handlers only read cached state, they
+never evaluate or enforce. Contracts load at engine start, so editing
+YAML requires a restart for now.
+
+On graceful shutdown the engine best-effort restores every ACTIVE
+contract before exiting and reports failures instead of abandoning
+modified resources.
+
+## Resource adapter boundary
+
+Domain code never calls scheduling APIs directly. All nice and affinity
+work goes through `ResourceAdapter` (`get_identity`, `get/set_nice`,
+`get/set_affinity`). The real implementation refuses clearly off Linux
+and maps kernel denials to explicit errors. Tests use the in-memory
+fake, which never stands in for real operations.
+
+## Snapshot, rollback, and identity safety
+
+Activation captures a `ResourceSnapshot` per target (PID, creation
+time, name, plus only the properties about to change) before any
+mutation. Mutations apply in contract order and PID order with
+read-back verification. Any failure rolls the journal back in reverse
+and lands the contract in ERROR with the rollback outcome recorded
+(clean versus incomplete, naming each failed resource).
+
+Restoration re-identifies each PID by creation time first. Exited
+processes need no restoration and retire quietly. A reused PID is stale:
+it is never touched and the contract goes to ERROR with a
+restoration failure. Errored contracts never retry on their own; they
+wait for manual reset or restart.
 
 ## Conceptual runtime flow
 
@@ -123,7 +152,7 @@ flowchart LR
   Restore --> Mon
 ```
 
-## Contract lifecycle concept (authoritative states, enforcement pending)
+## Contract lifecycle (implemented for nice/affinity)
 
 ```mermaid
 stateDiagram-v2
@@ -132,24 +161,15 @@ stateDiagram-v2
   ACTIVATING --> ACTIVE: snapshot prior state, apply actions
   ACTIVE --> RESTORING: trigger no longer applies or termination condition satisfied
   RESTORING --> INACTIVE: restore recorded prior state, emit lifecycle events
-  ACTIVATING --> INACTIVE: activation failed, record error
-  RESTORING --> ACTIVE: restoration failed, keep visible until resolved
+  ACTIVATING --> ERROR: activation failed, record error, roll back
+  RESTORING --> ERROR: restoration failed, record error
+  ERROR --> INACTIVE: manual reset or restart
 ```
 
-In the current read-only pass, satisfied triggers yield the preview
-outcome `WOULD_ACTIVATE` and the lifecycle remains `INACTIVE`.
-`ACTIVATING` and beyond require the enforcement pass.
-
-```mermaid
-stateDiagram-v2
-  [*] --> INACTIVE
-  INACTIVE --> ACTIVATING: trigger condition satisfied
-  ACTIVATING --> ACTIVE: snapshot prior state, apply actions
-  ACTIVE --> RESTORING: trigger no longer applies or termination condition satisfied
-  RESTORING --> INACTIVE: restore recorded prior state, emit lifecycle events
-  ACTIVATING --> INACTIVE: activation failed, record error
-  RESTORING --> ACTIVE: restoration failed, keep visible until resolved
-```
+`ACTIVE` is reported only after every action applied and verified.
+On platforms without enforcement, satisfied triggers yield the preview
+outcome `WOULD_ACTIVATE` and the lifecycle stays `INACTIVE`; previews
+are never logged or displayed as enforcement.
 
 State snapshots are taken during `ACTIVATING`, before any resource is
 mutated. `RESTORING` writes back the recorded values, not assumed defaults.
@@ -161,10 +181,10 @@ principle will apply to CPU affinity and other reversible controls.
 
 Every lifecycle transition should emit a structured event: which contract,
 which trigger fired, which actions were applied, which prior values were
-snapshotted, and which values were restored. In the current pass this is
-covered by Python logging (contract loaded, invalid contract, preview
-activation on outcome change, evaluation errors) plus typed evaluation
-results from every cycle. Logs are local structured
+snapshotted, and which values were restored. This is implemented as a
+bounded in-memory event history (latest 500, newest first over
+`GET /api/events`) recording transitions only, never per-poll repeats,
+plus Python logging. Logs are local structured
 records. No external database is planned. Preview outcomes must never be
 logged as enforcement.
 

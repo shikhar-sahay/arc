@@ -1,57 +1,46 @@
-# Demo (planned)
+# Demo (works on Linux)
 
-This demo is planned and does not work yet. It describes what a complete
-ARC lifecycle demonstration should prove once enforcement is
-implemented. Enforcement (changing nice values, affinity, or other
-process properties) does not exist yet.
+This demonstrates the full ARC lifecycle on a real process: condition,
+evaluation, snapshot, modification, ACTIVE, restore condition, exact
+restoration, and a logged trail. It needs Linux. Read-only parts work
+anywhere, enforcement does not.
 
-## What can be shown today
+## What you need
 
-Contract parsing and read-only evaluation already work without
-enforcement:
+- Linux (multi-core is best), Python 3.12+.
+- Backend installed: `cd backend && pip install -e ".[dev]"`.
+- A terminal for the worker, one for ARC, optionally one for the API.
 
-1. Validate an example: `arc validate
-   contracts/examples/interactive-session-relief.yaml`.
-2. Start the API and open `GET /api/contracts` to see the loaded
-   contract with its live preview outcome (`trigger_pending`,
-   `would_activate`, or `target_not_found`).
-3. Start a matching workload (for example a Python process whose
-   command line contains the target substring) and watch the outcome
-   change as conditions hold.
-4. Confirm in the response that ARC changed nothing: outcomes are
-   previews, and no resource property is modified.
+## Steps
 
-## Intended setup
+1. Start the workload (high load 15s, idle 15s, repeating):
+   `python scripts/demo_cpu_worker.py --high-seconds 15 --low-seconds 15`.
+   Note its PID.
+2. Make the example live:
+   `cp contracts/examples/interactive-session-relief.yaml contracts/`.
+   It targets `demo_cpu_worker`, triggers above 75 percent CPU for 5s,
+   applies `nice: 10`, and restores below 55 percent for 5s.
+3. Run ARC headlessly: `cd backend && arc run --interval 2`.
+4. Watch events: `contract_activating`, `resource_action_applied`,
+   `contract_activated`, later `contract_restoring`, `resource_restored`,
+   `contract_restored`.
+5. In another terminal, confirm with `ps -o pid,ni,comm -p <PID>`: nice
+   rises to 10 during high load and returns to its original value
+   during idle, while the same PID stays alive throughout.
+6. Stop ARC with Ctrl+C. ACTIVE contracts restore on exit. Remove
+   `contracts/interactive-session-relief.yaml` afterwards so the demo
+   policy is not live by accident.
 
-- A Linux host with ARC running.
-- A controlled CPU workload (for example a small busy-loop process started
-  for the demo).
-- One resource contract loaded from `contracts/examples/`.
+## Privilege caveat (read this, it is the OS lesson)
 
-## Intended lifecycle
-
-1. Start ARC.
-2. Start a controlled CPU workload.
-3. ARC observes the trigger condition (for example sustained CPU usage
-   above the contract threshold).
-4. The resource contract activates.
-5. ARC records the relevant prior resource state (for example the current
-   nice value and CPU affinity of the workload).
-6. ARC changes a real process property such as nice value or CPU affinity.
-7. The triggering condition ends.
-8. ARC restores the exact recorded prior state.
-9. ARC logs the complete lifecycle: activation, snapshot, actions,
-   restoration, and outcome.
-
-## Success criteria
-
-- A real process property changes while the contract is active.
-- The property returns to its recorded prior value afterwards.
-- Logs show each step with enough detail to audit the decision.
-- No step is simulated: failures surface as failures.
-
-## Status
-
-The full demo waits on the enforcement pass (action execution,
-snapshots, restoration execution). Monitoring, target resolution, and
-trigger evaluation are implemented and demonstrable read-only today.
+Raising a nice value (lowering priority, for example 0 to 10) normally
+works for your own processes. Lowering it back (for example 10 to 0)
+raises priority and the kernel may refuse it without privilege
+(`CAP_SYS_NICE`, typically root). If that happens, ARC does the honest
+thing: restoration fails explicitly, the contract goes to ERROR with a
+`restoration_failed` event, and nothing is faked. For the complete
+round trip, run the demo with appropriate privilege (for example
+`sudo`). Alternatively, demonstrate the reversible-without-privilege
+path with CPU affinity on your own processes, after editing the CPU
+list in `contracts/examples/memory-pressure-relief.yaml` to match your
+host (`nproc` shows available CPUs).

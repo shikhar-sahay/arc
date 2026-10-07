@@ -28,8 +28,22 @@ uvicorn arc.api.app:app --reload --port 8000
 
 Health check: `GET http://localhost:8000/api/health`
 
-Other read-only endpoints: `GET /api/system`, `GET /api/contracts`,
-`GET /api/processes?limit=100` (limit must be 1 to 1000).
+Other endpoints: `GET /api/status`, `GET /api/system`,
+`GET /api/contracts`, `GET /api/processes?limit=100` (limit must be 1
+to 1000), `GET /api/events?limit=100` (limit must be 1 to 500, newest
+first). Endpoints only read engine state; the engine loop runs in
+lifespan and enforces nothing per request.
+
+## Headless engine
+
+```bash
+cd backend
+arc run --contracts ../contracts --interval 2
+```
+
+Loads contracts, runs the engine, prints lifecycle events, restores
+ACTIVE contracts on Ctrl+C. Needs no FastAPI or React. Exit code is 1
+if shutdown restoration had problems.
 
 ## Contract validation CLI
 
@@ -105,3 +119,16 @@ Actual resource management requires Linux with appropriate permissions for
 the operations involved. Non-Linux hosts are for development of portable
 layers only. ARC must surface enforcement failures explicitly and must
 never report an unsupported operation as successful.
+
+Enforcement notes for Linux runs:
+
+- Raising nice values on your own processes usually works unprivileged.
+  Restoring them back down may need `CAP_SYS_NICE` (typically root).
+  See `docs/demo.md` for the privilege caveat.
+- CPU affinity on your own processes is usually reversible without
+  privilege, within cpuset limits. Always match the `cpus` list to the
+  host (`nproc`).
+- Unit tests use the in-memory fake adapter and never touch real
+  scheduling state. `tests/test_linux_integration.py` is the one
+  exception: it runs only on Linux, operates solely on a spawned child
+  process, and restores everything before terminating the child.

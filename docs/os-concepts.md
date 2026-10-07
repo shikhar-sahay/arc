@@ -9,7 +9,9 @@ ARC observes and acts on running Linux processes: their identities,
 lifetimes, resource usage, and tunable properties. PIDs are ephemeral
 (the kernel reuses them), so ARC contracts match on process metadata
 such as executable name and command line instead of persisted PIDs, and
-the monitor re-resolves matches on every cycle. The OS creates,
+the monitor re-resolves matches on every cycle. Snapshots pin PID plus
+process creation time, and restoration re-verifies the pair so a reused
+PID is never written to. The OS creates,
 schedules, and reaps processes. ARC coordinates policy on top of that
 lifecycle without replacing it.
 
@@ -19,19 +21,22 @@ Linux's Completely Fair Scheduler shares CPU among runnable tasks. The
 nice value (typically -20 to 19) biases a process's scheduling weight:
 lower values request preferential treatment, higher values yield more
 readily. Nice values influence priority relatively, they do not guarantee
-a fixed CPU share. ARC validates nice intents against this range today
-(`NiceAction` accepts -20 to 19) and will apply them as reversible
-actions in the enforcement pass. CPU utilization read back through
-`SystemSnapshot.cpu_percent` is the observation side of the same idea:
-it tells policy how busy the machine is, without promising any share.
+a fixed CPU share. ARC enforces nice values on Linux through the
+`ResourceAdapter` boundary: snapshot the current value, set the new one
+with `psutil.Process.nice()`, read it back to verify. CPU utilization
+read back through `SystemSnapshot.cpu_percent` is the observation side
+of the same idea: it tells policy how busy the machine is, without
+promising any share.
 
 ## 3. CPU affinity
 
 Affinity constrains which CPUs a task may execute on (for example through
 `sched_setaffinity` or cpuset controls). It is useful for cache locality
 or isolating workloads, but overly narrow masks can starve a process.
-Affinity changes are reversible, so ARC must record the prior mask and
-restore that exact mask afterwards.
+Affinity changes are reversible, so ARC records the prior mask in a
+`ResourceSnapshot` and restores that exact mask afterwards, verifying by
+reading it back. Requesting CPUs outside the allowed set fails
+activation explicitly instead of being silently masked.
 
 ## 4. Resource control with cgroups v2
 
@@ -61,20 +66,24 @@ logged outcome.
 
 ## 7. Concurrency
 
-Monitoring, evaluation, and enforcement operate on different cadences over
-shared state (active contracts, snapshots, event logs). That creates
-classic coordination concerns: stale reads, races between activation and
-restoration, and overlapping transitions for the same contract. Later
-passes need clear ownership of shared state and serialized lifecycle
-transitions per contract.
+Monitoring, evaluation, and enforcement share state (active contracts,
+snapshots, event logs). ARC keeps this simple: one synchronous engine
+step runs under a short lock, the async loop only schedules steps, and
+the API hands out copies. Lifecycle moves go through explicit
+transitions, and errored contracts latch instead of retrying every poll.
 
 ## 8. Protection and privileges
 
 Resource operations are privileged: lowering nice values, signaling other
 users' processes, or managing cgroups requires ownership or elevated
 capabilities. ARC runs as an ordinary user-space program subject to these
-checks. When the kernel refuses an operation, ARC must log the failure
-with context instead of pretending the action succeeded.
+checks, and it never escalates (no sudo, no password prompts). When the
+kernel refuses an operation, activation fails and rolls back, the
+contract goes to ERROR, and the event log explains the denial. The demo
+in `docs/demo.md` shows this concretely: restoring a nice value back
+down may need `CAP_SYS_NICE`, and ARC reports that honestly instead of
+faking success. `GET /api/status` exposes the platform capability report
+so operators can see the constraint up front.
 
 ## 9. Policy versus mechanism
 

@@ -108,6 +108,10 @@ uvicorn arc.api.app:app --reload --port 8000
 
 Health check: `GET http://localhost:8000/api/health`
 
+Full local run (Linux): start `scripts/demo_cpu_worker.py` in one
+terminal, copy an example into `contracts/`, then `arc run` from
+`backend/`. See `docs/demo.md` for the reproducible lifecycle demo.
+
 ## Frontend development
 
 ```bash
@@ -154,24 +158,29 @@ Implemented:
   validation and loading
 - read-only system and process monitoring built on psutil
 - process target resolution without persisted PIDs
-- trigger evaluation with monotonic duration handling
-- read-only observation engine producing preview outcomes
-  (`would_activate`, never claimed as enforcement)
-- read-only API endpoints: `GET /api/health`, `GET /api/system`,
-  `GET /api/contracts`, `GET /api/processes`
-- contract validation CLI (`arc validate <path>`)
-- minimal web page showing live backend state
+- trigger evaluation with monotonic duration handling and hysteresis
+- real Linux enforcement of `nice` and `cpu_affinity` through a
+  `ResourceAdapter` boundary (snapshot, apply in order, verify,
+  roll back on failure)
+- exact restoration with PID plus creation-time identity checks
+- persistent runtime engine with lifecycle states, bounded event
+  history, and graceful shutdown restoration
+- API: `GET /api/health`, `GET /api/status`, `GET /api/system`,
+  `GET /api/contracts`, `GET /api/processes`, `GET /api/events`
+  (all read engine state, none enforce)
+- headless runner (`arc run`) and contract validation CLI
+- reproducible Linux demo (`scripts/demo_cpu_worker.py`, `docs/demo.md`)
 
 Not yet implemented:
 
-- action execution (nice, affinity, suspend, resume)
-- resource state snapshots and restoration execution
-- cgroups enforcement
-- WebSocket live event streaming
-- final dashboard
+- `suspend`/`resume` execution (validated, explicitly rejected at
+  activation), cgroups enforcement
+- WebSocket live event streaming, final dashboard, hot contract reload
 
-See `docs/contracts.md` for the schema and `docs/demo.md` for what a
-demonstration can show today.
+Linux is required for enforcement. Raising nice values on your own
+processes usually works unprivileged, but restoring them back down may
+need privilege (`CAP_SYS_NICE`); ARC reports denials honestly instead
+of faking success. See `docs/demo.md` for the full story.
 
 ## Academic context
 
