@@ -2,8 +2,9 @@
 #
 # Files in contracts/examples/ are never loaded automatically. Copy a file
 # to contracts/ (the directory root, not a subdirectory) to make it live.
-# Actions below declare intent only. Enforcement is not implemented yet,
-# so ARC previews evaluation (WOULD_ACTIVATE) without changing resources.
+# The nice action below is really enforced on Linux. Lowering priority
+# (raising nice) works for your own processes, but restoring back down
+# may need privilege, see docs/demo.md.
 version: 1
 id: interactive-session-relief
 name: Interactive Session Relief

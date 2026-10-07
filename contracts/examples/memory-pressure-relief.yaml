@@ -2,8 +2,9 @@
 #
 # Files in contracts/examples/ are never loaded automatically. Copy a file
 # to contracts/ (the directory root, not a subdirectory) to make it live.
-# Actions below declare intent only. Enforcement is not implemented yet,
-# so ARC previews evaluation (WOULD_ACTIVATE) without changing resources.
+# The cpu_affinity action below is really enforced on Linux. Edit the CPU
+# list to match your host (check nproc and cpuset limits) before using it,
+# invalid CPUs fail activation explicitly instead of being applied.
 version: 1
 id: memory-pressure-relief
 name: Memory Pressure Relief
