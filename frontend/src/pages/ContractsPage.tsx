@@ -244,33 +244,59 @@ export function ContractsPage({
           })}
         </div>
       ) : (
-        <section className="panel">
-          <div className="empty">
-            <div>
-              <div className="empty-icon">
-                <FileCode2 size={18} />
-              </div>
-              <strong>
-                {loading
-                  ? "Loading contracts"
-                  : "Create your first resource contract"}
-              </strong>
-              <p>
-                A contract states when a condition must hold, which processes it
-                targets, what Linux resource controls ARC applies, and when
-                exact prior state is restored.
-              </p>
-              {!loading && (
-                <button
-                  className="button primary"
-                  onClick={() => show("create")}
-                >
-                  <Plus size={14} />
-                  Create contract
-                </button>
-              )}
+        <section className="contract-empty">
+          <div className="contract-empty-intro">
+            <div className="empty-icon">
+              <FileCode2 size={18} />
             </div>
+            <div>
+              <h2>
+                {loading ? "Loading Contracts" : "No Contracts Configured"}
+              </h2>
+              <p>
+                Define when ARC should observe a condition, apply Linux resource
+                controls, and restore the exact prior state.
+              </p>
+            </div>
+            {!loading && (
+              <button className="button primary" onClick={() => show("create")}>
+                <Plus size={14} />
+                Create Contract
+              </button>
+            )}
           </div>
+          {!loading && (
+            <ol className="contract-workflow">
+              <li>
+                <b>1</b>
+                <span>
+                  <strong>Observe</strong>
+                  <small>Measure a real condition</small>
+                </span>
+              </li>
+              <li>
+                <b>2</b>
+                <span>
+                  <strong>Evaluate</strong>
+                  <small>Check target and duration</small>
+                </span>
+              </li>
+              <li>
+                <b>3</b>
+                <span>
+                  <strong>Enforce</strong>
+                  <small>Apply validated controls</small>
+                </span>
+              </li>
+              <li>
+                <b>4</b>
+                <span>
+                  <strong>Restore</strong>
+                  <small>Recover prior state</small>
+                </span>
+              </li>
+            </ol>
+          )}
         </section>
       )}
       {open && (

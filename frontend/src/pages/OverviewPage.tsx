@@ -6,7 +6,6 @@ import {
   Cpu,
   FileCode2,
   MemoryStick,
-  Radio,
   ServerCog,
 } from "lucide-react";
 import {
@@ -16,7 +15,6 @@ import {
   ProcessItem,
   SystemTelemetry,
 } from "../types";
-import { WsStatus } from "../useWebSocket";
 import { TelemetryChart } from "../components/TelemetryChart";
 import {
   formatSecondsAgo,
@@ -33,8 +31,6 @@ interface Props {
   contracts: ContractStatus[];
   recentEvents: ArcEvent[];
   processes: ProcessItem[];
-  wsStatus: WsStatus;
-  stale: boolean;
   onNavigateEvents: () => void;
   onNavigateContracts: () => void;
 }
@@ -47,8 +43,6 @@ export function OverviewPage({
   contracts,
   recentEvents,
   processes,
-  wsStatus,
-  stale,
   onNavigateEvents,
   onNavigateContracts,
 }: Props) {
@@ -59,14 +53,6 @@ export function OverviewPage({
     ["activating", "active", "restoring"].includes(item.lifecycle),
   );
   const cores = telemetry?.cpu_per_core_percent ?? [];
-  const connection = stale
-    ? "Stale"
-    : wsStatus === "connected"
-      ? "Live"
-      : wsStatus === "reconnecting"
-        ? "Reconnecting"
-        : "Disconnected";
-
   return (
     <main className="page">
       <header className="page-header">
@@ -77,22 +63,6 @@ export function OverviewPage({
             Live Linux telemetry, policy state, and recent engine decisions from
             the persistent ARC runtime.
           </p>
-        </div>
-        <div className="page-actions">
-          <span
-            className={`badge ${stale || wsStatus !== "connected" ? "amber" : "green"}`}
-          >
-            <Radio size={11} />
-            {connection}
-          </span>
-          <span
-            className={`badge ${engineStatus?.enforcement_supported ? "green" : ""}`}
-          >
-            <ServerCog size={11} />
-            {engineStatus?.enforcement_supported
-              ? "Enforcement supported"
-              : "Observation only"}
-          </span>
         </div>
       </header>
 

@@ -14,25 +14,25 @@
   background: var(--canvas);
   color: var(--text);
   font-synthesis: none;
-  --canvas: #111315;
-  --sidebar: #17191b;
-  --surface: #1b1d1f;
-  --surface2: #222426;
-  --surface3: #292b2e;
-  --line: #313438;
-  --soft: #272a2d;
-  --muted: #9a9da3;
-  --faint: #656970;
+  --canvas: #0b0d0f;
+  --sidebar: #111417;
+  --surface: #171b1f;
+  --surface2: #1d2226;
+  --surface3: #23292e;
+  --line: #292f34;
+  --soft: #22282d;
+  --muted: #96a0a9;
+  --faint: #69737c;
   --blue: #5aa9fa;
   --green: #63c58a;
   --amber: #e2aa57;
   --red: #ee6a6a;
   --purple: #b28bf4;
-  --text: #f5f7fa;
-  --text-soft: #d8dade;
-  --field: #151719;
-  --hover: #242629;
-  --selected: #293039;
+  --text: #f0f2f4;
+  --text-soft: #d1d6da;
+  --field: #101316;
+  --hover: #1a1f23;
+  --selected: #252b30;
   --grid: #ffffff0b;
   --grid-strong: #ffffff16;
   --shadow: #0005;
@@ -114,7 +114,7 @@ textarea:focus-visible {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 218px minmax(0, 1fr);
 }
 .sidebar {
   position: sticky;
@@ -130,12 +130,25 @@ textarea:focus-visible {
 .brand {
   display: flex;
   align-items: center;
+  justify-content: center;
+  padding: 5px 10px 28px;
+}
+.brand-identity {
+  display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 2px 10px 22px;
+}
+.brand-identity .brand-mark-image {
+  width: 36px;
+  height: 36px;
+}
+.brand-identity strong {
+  font-size: 21px;
+  letter-spacing: 0.03em;
 }
 .brand-logo {
   display: block;
-  width: 148px;
+  width: 132px;
   height: auto;
 }
 .brand-logo-light {
@@ -171,17 +184,17 @@ textarea:focus-visible {
 }
 .nav-list {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 .nav-item {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--muted);
   background: transparent;
   text-align: left;
@@ -277,7 +290,7 @@ textarea:focus-visible {
 .page {
   width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 28px 32px 40px;
+  padding: 26px 30px 38px;
 }
 .page-header {
   min-height: 64px;
@@ -323,7 +336,7 @@ textarea:focus-visible {
   justify-content: center;
   gap: 7px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 0 11px;
   background: var(--surface2);
   color: var(--text-soft);
@@ -359,7 +372,7 @@ textarea:focus-visible {
 .panel {
   background: var(--surface);
   border: 1px solid var(--soft);
-  border-radius: 11px;
+  border-radius: 7px;
   box-shadow: 0 1px 2px var(--shadow);
 }
 .panel-header {
@@ -389,14 +402,18 @@ textarea:focus-visible {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 1px;
+  border: 1px solid var(--soft);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--soft);
 }
 .metric-tile {
   background: var(--surface);
-  border: 1px solid var(--soft);
-  border-radius: 10px;
-  padding: 13px 14px;
-  min-height: 94px;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 14px;
+  min-height: 88px;
 }
 .metric-label {
   color: var(--muted);
@@ -422,12 +439,12 @@ textarea:focus-visible {
 .section-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
-  gap: 12px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 10px;
 }
 .stack {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 .telemetry-chart {
   position: relative;
@@ -499,7 +516,7 @@ textarea:focus-visible {
 .core-tile {
   background: var(--canvas);
   border: 1px solid var(--soft);
-  border-radius: 8px;
+  border-radius: 5px;
   padding: 9px 10px;
 }
 .core-head {
@@ -623,6 +640,81 @@ textarea:focus-visible {
   margin: 6px 0 14px;
   font-size: 11px;
   line-height: 1.55;
+}
+.contract-empty {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 22px 0 18px;
+}
+.contract-empty-intro {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.contract-empty-intro .empty-icon {
+  margin: 0;
+}
+.contract-empty-intro h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 660;
+}
+.contract-empty-intro p {
+  margin: 5px 0 0;
+  max-width: 650px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.contract-workflow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  max-width: 920px;
+  margin: 18px auto 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--soft);
+  list-style: none;
+}
+.contract-workflow li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  border-left: 1px solid var(--soft);
+}
+.contract-workflow li:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+.contract-workflow b {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  font:
+    10px ui-monospace,
+    monospace;
+}
+.contract-workflow span {
+  display: grid;
+  gap: 2px;
+}
+.contract-workflow strong {
+  font-size: 11px;
+  color: var(--text-soft);
+}
+.contract-workflow small {
+  font-size: 9px;
+  color: var(--faint);
+  white-space: nowrap;
 }
 .notice {
   border: 1px solid #594526;
@@ -900,6 +992,21 @@ textarea:focus-visible {
     height: 27px;
     border-radius: 8px;
     font-size: 11px;
+  }
+  .contract-empty-intro {
+    grid-template-columns: auto 1fr;
+  }
+  .contract-empty-intro .button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .contract-workflow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 0;
+  }
+  .contract-workflow li:nth-child(3) {
+    border-left: 0;
+    padding-left: 0;
   }
   .page {
     padding: 18px 14px 28px;

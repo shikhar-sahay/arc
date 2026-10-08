@@ -210,29 +210,33 @@ export default function App() {
   ];
   const stale = !telemetry || now / 1000 - telemetry.timestamp > 12;
   const connectionLabel = backendError
-    ? "Backend unavailable"
-    : wsStatus === "connected"
-      ? "Live stream connected"
-      : wsStatus === "reconnecting"
-        ? "Stream reconnecting"
-        : "Stream disconnected";
+    ? "Engine Unavailable"
+    : stale
+      ? "Telemetry Stale"
+      : wsStatus === "connected"
+        ? "Engine Online"
+        : wsStatus === "reconnecting"
+          ? "Reconnecting"
+          : "Disconnected";
 
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand">
-          <img
-            className="brand-logo brand-logo-dark"
-            src="/brand/arc-logo-horizontal-light.svg"
-            alt="ARC"
-          />
-          <img
-            className="brand-logo brand-logo-light"
-            src="/brand/arc-logo-horizontal-dark.svg"
-            alt="ARC"
-          />
+          <div className="brand-identity">
+            <img
+              className="brand-mark-image brand-logo-dark"
+              src="/brand/arc-mark-light.svg"
+              alt=""
+            />
+            <img
+              className="brand-mark-image brand-logo-light"
+              src="/brand/arc-mark-dark.svg"
+              alt=""
+            />
+            <strong>ARC</strong>
+          </div>
         </div>
-        <div className="nav-label">Workspace</div>
         <nav className="nav-list">
           {nav.map(({ id, label, icon: Icon, count }) => (
             <button
@@ -259,7 +263,7 @@ export default function App() {
           </button>
           <div className="status-line">
             <span
-              className={`status-dot ${backendError ? "bad" : wsStatus === "connected" ? "ok" : "warn"}`}
+              className={`status-dot ${backendError ? "bad" : stale || wsStatus !== "connected" ? "warn" : "ok"}`}
             />
             <span>{connectionLabel}</span>
           </div>
@@ -267,7 +271,7 @@ export default function App() {
             <Activity size={13} />
             <span>
               {engineStatus?.enforcement_supported
-                ? "Linux enforcement supported"
+                ? `${engineStatus.platform} controls available`
                 : engineStatus
                   ? `${engineStatus.platform} observation mode`
                   : "Engine state unavailable"}
@@ -312,8 +316,6 @@ export default function App() {
             contracts={contracts}
             recentEvents={events}
             processes={processes}
-            wsStatus={wsStatus}
-            stale={stale}
             onNavigateEvents={() => setTab("events")}
             onNavigateContracts={() => setTab("contracts")}
           />
