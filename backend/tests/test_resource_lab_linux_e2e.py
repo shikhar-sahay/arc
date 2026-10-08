@@ -1,0 +1,58 @@
+"""Opt-in end-to-end Resource Lab validation against the real Linux kernel."""
+
+import os
+import sys
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from arc.api.app import create_app
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "linux" or os.environ.get("ARC_RUN_LINUX_E2E") != "1",
+    reason="set ARC_RUN_LINUX_E2E=1 on Linux to run the measured scenario",
+)
+
+
+def _wait_for(client: TestClient, lifecycle: str, timeout: float = 20.0) -> dict:
+    deadline = time.monotonic() + timeout
+    last: dict = {}
+    while time.monotonic() < deadline:
+        last = client.get("/api/resource-lab").json()
+        if last.get("contract", {}).get("lifecycle") == lifecycle:
+            return last
+        time.sleep(0.5)
+    pytest.fail(f"contract did not reach {lifecycle}: {last}")
+
+
+def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) -> None:
+    """GUI API to engine to kernel and back, repeated three times."""
+    with TestClient(
+        create_app(contracts_dir=tmp_path, auto_start=True, poll_interval_seconds=0.5)
+    ) as client:
+        started = client.post("/api/resource-lab/start", json={"workers": 10})
+        assert started.status_code == 200
+        original = {
+            item["pid"]: item["original_affinity"]
+            for item in started.json()["workloads"]
+            if item["role"] == "background"
+        }
+        assert client.post("/api/resource-lab/policy", json={"enabled": True}).status_code == 200
+
+        for _ in range(3):
+            assert client.post("/api/resource-lab/pressure", json={"high": True}).status_code == 200
+            active = _wait_for(client, "active")
+            background = [item for item in active["workloads"] if item["role"] == "background"]
+            assert active["background_operations_per_second"] > 0
+            assert all(item["affinity"] == [active["policy_cpu"]] for item in background)
+
+            assert (
+                client.post("/api/resource-lab/pressure", json={"high": False}).status_code == 200
+            )
+            restored = _wait_for(client, "inactive")
+            background = [item for item in restored["workloads"] if item["role"] == "background"]
+            assert all(item["affinity"] == original[item["pid"]] for item in background)
+
+        assert client.post("/api/resource-lab/stop").status_code == 200
