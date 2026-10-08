@@ -6,6 +6,7 @@ import {
   FileCode2,
   LayoutDashboard,
   Moon,
+  FlaskConical,
   Sun,
 } from "lucide-react";
 import {
@@ -21,9 +22,10 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { ContractsPage } from "./pages/ContractsPage";
 import { ProcessesPage } from "./pages/ProcessesPage";
 import { EventsPage } from "./pages/EventsPage";
+import { ResourceLabPage } from "./pages/ResourceLabPage";
 import { applyTheme, getInitialTheme, Theme } from "./lib/theme";
 
-type NavTab = "overview" | "contracts" | "processes" | "events";
+type NavTab = "overview" | "contracts" | "processes" | "lab" | "events";
 const MAX_HISTORY_POINTS = 60;
 
 export default function App() {
@@ -196,6 +198,11 @@ export default function App() {
   const nav = [
     { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
     {
+      id: "lab" as const,
+      label: "Resource Lab",
+      icon: FlaskConical,
+    },
+    {
       id: "contracts" as const,
       label: "Contracts",
       icon: FileCode2,
@@ -349,6 +356,7 @@ export default function App() {
             onRefresh={fetchEvents}
           />
         )}
+        {tab === "lab" && <ResourceLabPage />}
       </div>
     </div>
   );

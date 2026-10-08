@@ -12,6 +12,7 @@ import {
   SystemTelemetry,
   ProcessItem,
   ArcEvent,
+  ResourceLabState,
 } from "../types";
 
 export interface ContractListResponse {
@@ -153,6 +154,48 @@ export const api = {
   async reloadContracts(): Promise<{ status: string; contract_count: number }> {
     const res = await fetch(endpoint("/api/engine/reload"), { method: "POST" });
     return handleResponse<{ status: string; contract_count: number }>(res);
+  },
+
+  async getResourceLab(): Promise<ResourceLabState> {
+    return handleResponse<ResourceLabState>(
+      await fetch(endpoint("/api/resource-lab")),
+    );
+  },
+
+  async startResourceLab(workers: number): Promise<ResourceLabState> {
+    return handleResponse<ResourceLabState>(
+      await fetch(endpoint("/api/resource-lab/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workers }),
+      }),
+    );
+  },
+
+  async setResourceLabPressure(high: boolean): Promise<ResourceLabState> {
+    return handleResponse<ResourceLabState>(
+      await fetch(endpoint("/api/resource-lab/pressure"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ high }),
+      }),
+    );
+  },
+
+  async setResourceLabPolicy(enabled: boolean): Promise<ResourceLabState> {
+    return handleResponse<ResourceLabState>(
+      await fetch(endpoint("/api/resource-lab/policy"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      }),
+    );
+  },
+
+  async stopResourceLab(): Promise<ResourceLabState> {
+    return handleResponse<ResourceLabState>(
+      await fetch(endpoint("/api/resource-lab/stop"), { method: "POST" }),
+    );
   },
 };
 

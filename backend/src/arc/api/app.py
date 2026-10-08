@@ -53,6 +53,8 @@ from arc.contracts.repository import (
 )
 from arc.core.engine import ContractStatusView, ObservationEngine
 from arc.core.lifecycle import LifecycleState
+from arc.lab import ResourceLabController
+from arc.lab.controller import ResourceLabError
 from arc.linux.resources import ResourceAdapter
 from arc.monitoring.processes import sample_processes
 from arc.monitoring.system import SystemMonitor
@@ -69,6 +71,17 @@ MAX_EVENT_LIMIT = 500
 
 class ToggleEnabledRequest(BaseModel):
     enabled: bool
+
+
+class ResourceLabStartRequest(BaseModel):
+    workers: int = 4
+
+
+class ResourceLabPressureRequest(BaseModel):
+    high: bool
+
+
+LAB_CONTRACT_ID = "resource-lab-cpu-contention"
 
 
 class ValidateContractResponse(BaseModel):
@@ -219,6 +232,7 @@ def create_app(
         app.state.engine = engine
         app.state.contract_load_issues = issues
         app.state.ws_manager = ws_manager
+        app.state.resource_lab = ResourceLabController()
         task: asyncio.Task[None] | None = None
         ws_broadcast_task: asyncio.Task[None] | None = None
         if auto_start:
@@ -254,6 +268,7 @@ def create_app(
             problems = engine.shutdown()
             for problem in problems:
                 logger.error("shutdown restoration problem: %s", problem)
+            app.state.resource_lab.close()
 
     app = FastAPI(
         title="ARC",
@@ -561,6 +576,129 @@ def create_app(
             count=len(events),
             limit=limit,
         )
+
+    def resource_lab_payload() -> dict[str, object]:
+        payload = app.state.resource_lab.status()
+        view = next(
+            (
+                item
+                for item in app.state.engine.contract_statuses()
+                if item.contract.id == LAB_CONTRACT_ID
+            ),
+            None,
+        )
+        payload["contract"] = (
+            _contract_status_response(view).model_dump(mode="json") if view is not None else None
+        )
+        return payload
+
+    def install_resource_lab_contract(cpu: int) -> None:
+        engine: ObservationEngine = app.state.engine
+        contract = Contract.model_validate(
+            {
+                "version": 1,
+                "id": LAB_CONTRACT_ID,
+                "name": "Resource Lab CPU Contention",
+                "description": "Isolate controlled background workers during sustained pressure.",
+                "enabled": False,
+                "target": {
+                    "type": "process",
+                    "match": {"command_contains": "arc-resource-lab-background"},
+                },
+                "trigger": {
+                    "metric": "system.cpu.percent",
+                    "operator": "gt",
+                    "value": 20,
+                    "for_seconds": 3,
+                },
+                "actions": [{"type": "cpu_affinity", "cpus": [cpu]}],
+                "restore": {
+                    "metric": "system.cpu.percent",
+                    "operator": "lt",
+                    "value": 10,
+                    "for_seconds": 3,
+                },
+            }
+        )
+        existing = next((item for item in engine.contracts if item.id == LAB_CONTRACT_ID), None)
+        if existing is not None and existing == contract:
+            return
+        try:
+            engine.set_contract(contract)
+            save_contract_file(app.state.contracts_dir, contract)
+        except (ValueError, ContractPersistenceError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/resource-lab")
+    def get_resource_lab() -> dict[str, object]:
+        """Read current controlled workload measurements and policy state."""
+        return resource_lab_payload()
+
+    @app.post("/api/resource-lab/start")
+    def start_resource_lab(request: ResourceLabStartRequest) -> dict[str, object]:
+        """Start bounded ARC-owned workers and install the disabled demo contract."""
+        try:
+            state = app.state.resource_lab.start(request.workers)
+            cpu = state.get("policy_cpu")
+            if not isinstance(cpu, int):
+                raise ResourceLabError("no usable policy CPU was detected")
+            install_resource_lab_contract(cpu)
+            return resource_lab_payload()
+        except ResourceLabError as exc:
+            app.state.resource_lab.stop()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except HTTPException:
+            app.state.resource_lab.stop()
+            raise
+
+    @app.post("/api/resource-lab/pressure")
+    def set_resource_lab_pressure(
+        request: ResourceLabPressureRequest,
+    ) -> dict[str, object]:
+        """Switch real background workers between measured HIGH and LOW modes."""
+        try:
+            app.state.resource_lab.set_pressure(request.high)
+            return resource_lab_payload()
+        except ResourceLabError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/resource-lab/policy")
+    def set_resource_lab_policy(payload: ToggleEnabledRequest) -> dict[str, object]:
+        """Enable or disable the real Resource Lab contract through the engine."""
+        try:
+            app.state.engine.enable_contract(
+                LAB_CONTRACT_ID,
+                payload.enabled,
+                persist=lambda contract: save_contract_file(app.state.contracts_dir, contract),
+            )
+            return resource_lab_payload()
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="start the Resource Lab first") from exc
+        except (ValueError, ContractPersistenceError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/resource-lab/stop")
+    def stop_resource_lab() -> dict[str, object]:
+        """Stop lab-owned workers only after ARC has released their resources."""
+        runtime = app.state.engine.runtime_for(LAB_CONTRACT_ID)
+        if runtime is not None and (
+            runtime.lifecycle is not LifecycleState.INACTIVE or runtime.snapshots
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="lower pressure and wait for exact restoration before stopping the lab",
+            )
+        contract = next(
+            (item for item in app.state.engine.contracts if item.id == LAB_CONTRACT_ID), None
+        )
+        if contract is not None and contract.enabled:
+            app.state.engine.enable_contract(
+                LAB_CONTRACT_ID,
+                False,
+                persist=lambda updated: save_contract_file(app.state.contracts_dir, updated),
+            )
+        app.state.resource_lab.stop()
+        return resource_lab_payload()
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:

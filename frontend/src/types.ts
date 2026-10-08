@@ -25,6 +25,30 @@ export interface TargetIdentity {
   pid: number;
   create_time: number;
   name?: string | null;
+  start_time_ticks?: number | null;
+}
+
+export interface ResourceLabWorkload {
+  pid: number;
+  role: "foreground" | "background";
+  cpu_percent: number;
+  affinity: number[];
+  original_affinity: number[];
+  nice: number;
+  operations_per_second: number;
+  sampled_at?: number | null;
+}
+
+export interface ResourceLabState {
+  supported: boolean;
+  state: "stopped" | "baseline" | "pressure" | "recovery";
+  worker_count: number;
+  foreground_operations_per_second: number;
+  background_operations_per_second: number;
+  workloads: ResourceLabWorkload[];
+  target_token?: string | null;
+  policy_cpu?: number | null;
+  contract?: ContractStatus | null;
 }
 
 export interface ProcessMatch {
