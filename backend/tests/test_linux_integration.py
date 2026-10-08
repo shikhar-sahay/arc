@@ -12,8 +12,13 @@ from contextlib import contextmanager
 
 import pytest
 
+from arc.contracts.models import Contract
+from arc.core.engine import ObservationEngine
+from arc.core.lifecycle import LifecycleState
 from arc.linux.psutil_adapter import LinuxResourceAdapter
 from arc.linux.resources import ResourcePermissionError
+from arc.monitoring.processes import ProcessObservation
+from arc.monitoring.system import SystemSnapshot
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="requires Linux")
 
@@ -73,3 +78,56 @@ def test_real_adapter_nice_roundtrip_on_child_process() -> None:
         except ResourcePermissionError:
             pytest.skip("lowering nice back needs privilege on this host")
         assert adapter.get_nice(child.pid) == original_nice
+
+
+def test_engine_repeats_affinity_enforcement_and_exact_restoration() -> None:
+    """Run three complete engine cycles against one real Linux child."""
+    adapter = LinuxResourceAdapter()
+    with controlled_child() as child:
+        original = adapter.get_affinity(child.pid)
+        if len(original) < 2:
+            pytest.skip("affinity cycle needs at least two available CPUs")
+        contract = Contract.model_validate(
+            {
+                "version": 1,
+                "id": "linux-affinity-cycle",
+                "name": "Linux affinity cycle",
+                "enabled": True,
+                "target": {
+                    "type": "process",
+                    "match": {"executable": "python", "command_contains": "time.sleep(120)"},
+                },
+                "trigger": {
+                    "metric": "system.cpu.percent",
+                    "operator": "gt",
+                    "value": 20,
+                    "for_seconds": 0,
+                },
+                "actions": [{"type": "cpu_affinity", "cpus": [original[0]]}],
+                "restore": {
+                    "metric": "system.cpu.percent",
+                    "operator": "lt",
+                    "value": 10,
+                    "for_seconds": 0,
+                },
+            }
+        )
+        engine = ObservationEngine([contract], resource_adapter=adapter)
+        observation = ProcessObservation(
+            pid=child.pid,
+            name="python",
+            cmdline="python -c import time; time.sleep(120)",
+            cpu_percent=0.0,
+            memory_percent=0.0,
+        )
+
+        for cycle in range(3):
+            high = SystemSnapshot(50.0, 10.0, len(original), float(cycle * 2))
+            engine.step(high, [observation], now=float(cycle * 2))
+            assert engine.runtime_for(contract.id).lifecycle is LifecycleState.ACTIVE
+            assert adapter.get_affinity(child.pid) == (original[0],)
+
+            low = SystemSnapshot(0.2, 10.0, len(original), float(cycle * 2 + 1))
+            engine.step(low, [observation], now=float(cycle * 2 + 1))
+            assert engine.runtime_for(contract.id).lifecycle is LifecycleState.INACTIVE
+            assert adapter.get_affinity(child.pid) == original

@@ -27,6 +27,24 @@ _STOP_VERIFY_ATTEMPTS = 5
 _STOP_VERIFY_DELAY_SECONDS = 0.05
 
 
+def _linux_start_time_ticks(pid: int, operation: str) -> int:
+    """Read the kernel process start tick without wall-clock conversion."""
+    try:
+        stat = open(f"/proc/{pid}/stat", encoding="utf-8").read()
+    except FileNotFoundError as exc:
+        raise ProcessNotFoundError(operation, pid, "process no longer exists") from exc
+    except PermissionError as exc:
+        raise ResourcePermissionError(operation, pid, "cannot read procfs identity") from exc
+    except OSError as exc:
+        raise ResourceControlError(operation, pid, f"cannot read procfs identity: {exc}") from exc
+    close = stat.rfind(")")
+    try:
+        # Fields after comm start at field 3. Index 19 is field 22, starttime.
+        return int(stat[close + 2 :].split()[19])
+    except (ValueError, IndexError) as exc:
+        raise ResourceControlError(operation, pid, "malformed /proc process stat") from exc
+
+
 def _require_linux(operation: str, pid: int | None = None) -> None:
     if sys.platform != "linux":
         raise UnsupportedPlatformError(
@@ -54,7 +72,7 @@ class LinuxResourceAdapter:
     """Real adapter. Safe to construct anywhere; use refuses off Linux."""
 
     def __init__(self) -> None:
-        self._suspended_by_arc: set[tuple[int, float]] = set()
+        self._suspended_by_arc: set[tuple[int, int]] = set()
 
     @staticmethod
     def _protected_pids() -> set[int]:
@@ -83,6 +101,7 @@ class LinuxResourceAdapter:
                 pid=pid,
                 create_time=float(proc.create_time()),
                 name=proc.name(),
+                start_time_ticks=_linux_start_time_ticks(pid, operation),
             )
         except psutil.NoSuchProcess as exc:
             raise ProcessNotFoundError(operation, pid, "process exited during inspection") from exc
@@ -158,7 +177,7 @@ class LinuxResourceAdapter:
             )
         proc = _process(operation, pid)
         try:
-            identity = (pid, float(proc.create_time()))
+            identity = (pid, _linux_start_time_ticks(pid, operation))
             proc.suspend()
         except psutil.NoSuchProcess as exc:
             raise ProcessNotFoundError(operation, pid, "process exited before suspend") from exc
@@ -176,7 +195,7 @@ class LinuxResourceAdapter:
         operation = "resume_process"
         proc = _process(operation, pid)
         try:
-            identity = (pid, float(proc.create_time()))
+            identity = (pid, _linux_start_time_ticks(pid, operation))
             if pid in self._protected_pids() and identity not in self._suspended_by_arc:
                 raise ResourceControlError(
                     operation,

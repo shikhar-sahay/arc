@@ -38,6 +38,7 @@ from arc.linux.resources import (
     ResourceAdapter,
     ResourceControlError,
     ResourceSnapshot,
+    same_process,
 )
 from arc.monitoring.processes import (
     ProcessObservation,
@@ -212,7 +213,7 @@ class ObservationEngine:
             )
             # Validate the entire replacement before mutating definitions or trackers.
             for old_id, runtime in self._runtimes.items():
-                if runtime.lifecycle not in protected:
+                if runtime.lifecycle not in protected and not runtime.snapshots:
                     continue
                 replacement = new_contract_map.get(old_id)
                 if replacement is None:
@@ -784,7 +785,7 @@ class ObservationEngine:
             except ResourceControlError as exc:
                 unchecked.append(f"pid {pid}: {exc.detail}")
                 continue
-            if current.create_time != snapshot.identity.create_time:
+            if not same_process(current, snapshot.identity):
                 logger.error(
                     "pid %s reused by a new process lifetime, refusing restoration",
                     pid,

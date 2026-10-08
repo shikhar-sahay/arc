@@ -18,14 +18,26 @@ from typing import Protocol
 class ProcessIdentity:
     """Stable-for-lifetime process identity.
 
-    PID alone is unsafe because the kernel reuses PIDs. The creation
-    time pins an identity to one process lifetime. ARC verifies this
-    pair before restoring state so it never writes onto a reused PID.
+    PID alone is unsafe because the kernel reuses PIDs. On Linux,
+    ``start_time_ticks`` is field 22 from ``/proc/<pid>/stat`` and is the
+    authoritative lifetime discriminator. ``create_time`` remains for
+    display and adapters without procfs, but wall-clock boot-time drift
+    must not decide whether restoration is safe.
     """
 
     pid: int
     create_time: float
     name: str | None = None
+    start_time_ticks: int | None = None
+
+
+def same_process(left: ProcessIdentity, right: ProcessIdentity) -> bool:
+    """Return whether two identities describe the same process lifetime."""
+    if left.pid != right.pid:
+        return False
+    if left.start_time_ticks is not None and right.start_time_ticks is not None:
+        return left.start_time_ticks == right.start_time_ticks
+    return left.create_time == right.create_time
 
 
 @dataclass(frozen=True)

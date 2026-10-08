@@ -88,6 +88,23 @@ def test_reload_allows_inactive_definition_update() -> None:
     assert engine.contracts == [changed]
 
 
+def test_reload_protects_error_contract_with_recoverable_snapshot() -> None:
+    from arc.linux.resources import ResourceSnapshot
+
+    original = make_contract(id="c1")
+    engine, fake = make_engine(contracts=[original])
+    runtime = engine.runtime_for("c1")
+    assert runtime is not None
+    runtime.lifecycle = LifecycleState.ERROR
+    runtime.snapshots = [ResourceSnapshot(identity=fake.get_identity(50), nice=0)]
+
+    with pytest.raises(ValueError, match="cannot remove contract c1"):
+        engine.reload_contracts([])
+
+    assert engine.contracts == [original]
+    assert runtime.snapshots
+
+
 def test_set_contract_protects_active_contract() -> None:
     c1 = make_contract(id="c1")
     engine, _ = make_engine(contracts=[c1])

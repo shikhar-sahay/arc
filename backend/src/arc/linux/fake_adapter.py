@@ -23,6 +23,7 @@ class FakeProcess:
 
     pid: int
     create_time: float
+    start_time_ticks: int | None = None
     name: str | None = None
     nice: int = 0
     affinity: tuple[int, ...] = (0,)
@@ -85,7 +86,12 @@ class FakeResourceAdapter:
     def get_identity(self, pid: int) -> ProcessIdentity:
         """Return the fake stable identity for a live process."""
         proc = self._live("get_identity", pid)
-        return ProcessIdentity(pid=pid, create_time=proc.create_time, name=proc.name)
+        return ProcessIdentity(
+            pid=pid,
+            create_time=proc.create_time,
+            name=proc.name,
+            start_time_ticks=proc.start_time_ticks,
+        )
 
     def get_nice(self, pid: int) -> int:
         """Read the fake nice value."""

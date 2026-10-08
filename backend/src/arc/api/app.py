@@ -113,6 +113,7 @@ def _contract_status_response(view: ContractStatusView) -> ContractStatus:
                 pid=identity.pid,
                 create_time=identity.create_time,
                 name=identity.name,
+                start_time_ticks=identity.start_time_ticks,
             )
             for identity in view.active_identities
         ],
@@ -469,6 +470,12 @@ def create_app(
         engine: ObservationEngine = app.state.engine
         success = engine.reset_contract(contract_id)
         if not success:
+            runtime = engine.runtime_for(contract_id)
+            if runtime is not None and runtime.lifecycle is LifecycleState.ERROR:
+                raise HTTPException(
+                    status_code=409,
+                    detail=runtime.last_error or f"contract {contract_id} recovery failed",
+                )
             raise HTTPException(
                 status_code=400,
                 detail=f"contract {contract_id} is not in ERROR state or does not exist",

@@ -90,6 +90,7 @@ def test_signal_safety_protects_parent_chain(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("arc.linux.psutil_adapter.os.getpid", lambda: 100)
     monkeypatch.setattr(psutil, "Process", Process)
+    monkeypatch.setattr("arc.linux.psutil_adapter._linux_start_time_ticks", lambda *_: 10)
     adapter = LinuxResourceAdapter()
 
     with pytest.raises(ResourceControlError, match="parent chain"):
@@ -128,6 +129,7 @@ def test_tracked_suspend_can_be_restored_if_target_becomes_protected(
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("arc.linux.psutil_adapter.os.getpid", lambda: 100)
     monkeypatch.setattr(psutil, "Process", Process)
+    monkeypatch.setattr("arc.linux.psutil_adapter._linux_start_time_ticks", lambda *_: 20)
     adapter = LinuxResourceAdapter()
 
     adapter.suspend_process(200)

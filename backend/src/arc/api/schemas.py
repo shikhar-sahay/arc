@@ -115,6 +115,7 @@ class TargetIdentityResponse(BaseModel):
 
     pid: int
     create_time: float
+    start_time_ticks: int | None = None
     name: str | None = None
 
 

@@ -2,7 +2,7 @@
 
 from arc.core.lifecycle import EvaluationOutcome, LifecycleState
 from arc.linux.fake_adapter import FakeProcess
-from arc.linux.resources import ResourceSnapshot
+from arc.linux.resources import ProcessIdentity, ResourceSnapshot
 from arc.restoration.service import restore_snapshots
 from tests.conftest import make_engine, make_fake, make_observation, make_telemetry
 
@@ -74,6 +74,27 @@ def test_reused_pid_is_never_touched() -> None:
     assert result.ok is False
     assert result.stale == [50]
     assert fake.get_nice(50) == 0
+
+
+def test_kernel_start_ticks_override_wall_clock_creation_time_drift() -> None:
+    """WSL boot-time drift cannot misclassify one live process as PID reuse."""
+    fake = make_fake(pid=50, nice=5, create_time=1004.0)
+    fake._processes[50].start_time_ticks = 123456  # noqa: SLF001
+    snapshot = ResourceSnapshot(
+        identity=ProcessIdentity(
+            pid=50,
+            create_time=1000.0,
+            name="python",
+            start_time_ticks=123456,
+        ),
+        nice=5,
+    )
+    fake.set_nice(50, 10)
+
+    result = restore_snapshots([snapshot], fake)
+
+    assert result.ok is True
+    assert fake.get_nice(50) == 5
 
 
 def test_failed_restore_is_reported() -> None:

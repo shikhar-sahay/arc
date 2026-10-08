@@ -18,6 +18,7 @@ from arc.linux.resources import (
     ResourceAdapter,
     ResourceControlError,
     ResourceSnapshot,
+    same_process,
 )
 
 if TYPE_CHECKING:
@@ -83,7 +84,7 @@ def restore_snapshots(
         except ResourceControlError as exc:
             entries.append(RestoreEntry(pid=pid, status="failed", detail=str(exc)))
             continue
-        if current.create_time != snapshot.identity.create_time:
+        if not same_process(current, snapshot.identity):
             logger.error(
                 "pid %s reused by a new process lifetime, refusing restoration",
                 pid,
