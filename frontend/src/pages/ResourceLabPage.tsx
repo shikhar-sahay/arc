@@ -311,8 +311,8 @@ export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
           <div>
             <strong>Process Suspension</strong>
             <span>
-              Load the disabled resource-lab-suspend example in Contracts to verify
-              SIGSTOP and SIGCONT.
+              Load the disabled resource-lab-suspend example in Contracts to
+              verify SIGSTOP and SIGCONT.
             </span>
           </div>
           <div>
