@@ -34,6 +34,8 @@ The Resource Lab is the primary demonstration. It creates only backend-owned,
 uniquely tagged Linux child processes. The foreground worker continuously
 reports measured operations per second. Background workers remain idle during
 the baseline phase and perform the same bounded computation during pressure.
+One separately tagged, low-activity suspension target is included so a signal
+demonstration does not stop the workers that maintain trigger pressure.
 
 1. Open **Resource Lab** and select 6 to 10 background workers. Use fewer on a
    smaller WSL VM.
@@ -69,9 +71,10 @@ For the secondary workbench, copy either
 `contracts/examples/resource-lab-suspend.yaml` or
 `contracts/examples/resource-lab-affinity-conflict.yaml` into `contracts/`,
 reload on the Contracts page, and enable it only while Resource Lab workers are
-running. The suspension policy exercises verified SIGSTOP and SIGCONT. The
-conflict policy demonstrates that a second affinity owner defers rather than
-overwriting the active policy.
+running. The suspension policy targets only the dedicated suspension target,
+while background workers continue to generate pressure. The conflict policy
+demonstrates that a second affinity owner defers rather than overwriting the
+active policy.
 
 ## Terminal Fallback Preflight
 
@@ -142,7 +145,26 @@ rm contracts/faculty-affinity-demo.yaml
 
 ### C. SIGSTOP and SIGCONT
 
-Use this example separately from the affinity contract:
+The GUI-first option uses the dedicated Resource Lab suspension target:
+
+```bash
+cp contracts/examples/resource-lab-suspend.yaml contracts/resource-lab-suspend.yaml
+```
+
+Reload Contracts, enable the copied policy, start Resource Lab, and apply
+pressure. Read the `suspension-target` PID from the Resource Lab table, then
+verify it independently:
+
+```bash
+ps -p <PID> -o pid,ppid,stat,args
+```
+
+The target should enter `T` while the background workers continue running.
+Select **Lower Pressure**, wait for restoration, and confirm that the target is
+no longer stopped. This avoids feedback oscillation caused by suspending the
+same workers that provide trigger pressure.
+
+The terminal fallback uses this separate example:
 
 ```bash
 cp contracts/examples/faculty-suspend-demo.yaml contracts/faculty-suspend-demo.yaml
@@ -157,8 +179,9 @@ python3 scripts/faculty_demo.py low
 grep '^State:' /proc/<PID>/status
 ```
 
-The process should return to a non-stopped state. ARC verifies PID plus creation
-time and refuses to suspend itself, its parent chain, or unsafe targets.
+The process should return to a non-stopped state. ARC verifies PID plus Linux
+kernel start-time ticks and refuses to suspend itself, its parent chain, or
+unsafe targets.
 
 ### D. Conflict Safety
 
@@ -206,7 +229,8 @@ never deletes contracts or signals processes it did not create.
 ARC is not only a monitoring dashboard. Its headless engine samples Linux,
 evaluates declarative conditions with monotonic duration tracking, resolves
 targets, snapshots kernel-visible state, applies and reads back controls, and
-restores exact prior values. PID plus creation time protects against PID reuse.
+restores exact prior values. PID plus Linux kernel start-time ticks protects
+against PID reuse.
 A reverse journal handles partial activation. Resource-level ownership prevents
 overlapping contracts from overtaking each other. The UI observes the persistent
 engine and manages contracts; it does not enforce policy.

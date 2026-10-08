@@ -1,215 +1,291 @@
 # ARC: Adaptive Resource Contract Engine
 
-ARC is a Linux user-space, event-driven policy engine for adaptive
-resource management. Users define Adaptive Resource Contracts, and ARC
-applies them to running workloads when runtime conditions hold, then
-restores prior resource state when they no longer apply.
+ARC is a Linux user-space policy engine that observes running workloads and
+applies temporary resource controls from declarative YAML contracts. It uses
+existing Linux mechanisms such as CPU affinity, nice values, signals, `/proc`,
+and cgroups v2. ARC is not a new scheduler and is not only a monitoring
+dashboard.
 
-## Core idea
+The central guarantee is restoration. Before ARC mutates a process, it records
+the exact relevant state. When the restore condition holds, ARC verifies the
+process lifetime and writes that state back. Failures remain visible and
+recoverable instead of being reported as success.
 
-Every contract follows the same shape:
+## Core Concept
 
-Trigger, then Action(s), then Restoration.
+```text
+Observe -> Evaluate -> Enforce -> Audit -> Restore
+```
 
-A trigger condition activates the contract, ARC applies one or more
-resource actions through existing Linux mechanisms, and a termination
-condition causes ARC to restore the exact prior resource state it
-recorded. See `docs/contracts.md` for the conceptual model.
+A contract defines **WHEN** a condition is true, **FOR** how long it must hold,
+what Linux action to **DO**, and **UNTIL** which restore condition holds before
+ARC must **RESTORE** the captured state.
 
-## Why ARC exists
+```yaml
+version: 1
+id: background-affinity
+name: Background Affinity
+enabled: true
+target:
+  type: process
+  match:
+    command_contains: arc-resource-lab-background
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 20
+  for_seconds: 3
+actions:
+  - type: cpu_affinity
+    cpus: [11]
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 10
+  for_seconds: 3
+```
 
-Linux already provides powerful resource controls: scheduling priorities,
-CPU affinity, signals, `/proc` observation, and cgroups. The missing
-piece ARC investigates is a higher-level contract abstraction that
-coordinates those mechanisms according to runtime conditions, with
-explicit activation, restoration, and auditability. ARC adds policy and
-orchestration, not new kernel primitives.
+CPU indexes must be valid for the host. Resource Lab generates its built-in
+contract from the CPUs actually available to its workers.
 
-## Operating Systems relevance
+## Implemented Features
 
-ARC works directly with OS-level concerns:
+- Aggregate CPU, memory, logical-core, and process telemetry.
+- YAML contracts with validation, CRUD, enablement, reload, and manual recovery.
+- Monotonic trigger and restore durations with independent hysteresis.
+- Process targeting by executable name and command-line substring.
+- CPU affinity with kernel read-back and exact mask restoration.
+- Nice priority with read-back and explicit permission failures.
+- SIGSTOP and SIGCONT with prior-state restoration and self-protection.
+- cgroups v2 `cpu.max` when a writable CPU-controller delegation exists.
+- PID reuse protection using PID plus Linux kernel start-time ticks.
+- Snapshot-before-mutation, reverse rollback, and latched ERROR state.
+- Per-process, per-resource ownership with deterministic conflict deferral.
+- Bounded structured audit history.
+- Headless operation through `arc run`.
+- FastAPI REST and observation-only WebSocket interfaces.
+- React dashboard and a controlled, real-process Resource Lab.
 
-- process management (observing and acting on running processes)
-- CPU scheduling and priorities (for example nice values)
-- CPU affinity (which CPUs a task may run on)
-- resource allocation and control (including selected cgroups v2 controls)
-- process signals (such as suspend and resume semantics)
-- `/proc` and runtime observation
-- cgroups for accounting and limits
-- concurrency between monitoring, evaluation, and enforcement
-- protection and privileges (operations can fail, and failures must be
-  reported honestly)
+Capabilities are reported conservatively. Detection does not override Linux
+permission checks, and ARC never invokes `sudo`.
 
-Background reading: `docs/os-concepts.md`.
-
-## High-level architecture
+## Architecture
 
 ```mermaid
 flowchart TD
-  Web["ARC Web (React observation UI)"] --> API["ARC API (FastAPI interface)"]
-  API --> Core["ARC Core (monitoring, evaluation, enforcement, restoration)"]
-  Core --> LinuxInt["Linux Integration (adapters for /proc, nice, affinity, signals, cgroups)"]
-  LinuxInt --> Linux["Linux Processes and Resources"]
+  UI[React and Vite frontend] --> API[FastAPI interface]
+  API --> Engine[Persistent contract engine]
+  Engine --> Eval[Evaluation and lifecycle]
+  Engine --> Enforce[Enforcement and restoration]
+  Enforce --> Linux[psutil, procfs, signals, affinity, cgroups v2]
 ```
 
-Within ARC Core, the conceptual flow is:
+- `frontend/src/`: observation and contract management, never policy authority.
+- `backend/src/arc/api/`: HTTP and WebSocket interface around one engine.
+- `backend/src/arc/core/`: lifecycle, resource ownership, and engine loop.
+- `backend/src/arc/contracts/`: schema, loading, validation, and persistence.
+- `backend/src/arc/evaluation/`: read-only condition evaluation.
+- `backend/src/arc/enforcement/`: snapshot, ordered mutation, verification,
+  and reverse rollback.
+- `backend/src/arc/restoration/`: identity verification and exact restoration.
+- `backend/src/arc/linux/`: real Linux adapters and test-only fakes.
+- `backend/src/arc/observability/`: bounded in-memory audit events.
+- `backend/src/arc/lab/`: controlled Resource Lab workers and measurements.
 
-Monitoring, then Event Detection, then Contract Evaluation, then Policy
-Enforcement, then Restoration and Continuous Monitoring.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for lifecycle and ownership details.
 
-Full detail: `ARCHITECTURE.md`.
+## Contracts and Linux Controls
 
-## Technology stack
+Conditions support `system.cpu.percent`, `system.memory.percent`, and
+`target.process.present`. Numeric conditions accept `gt`, `gte`, `lt`, `lte`,
+`eq`, and `ne`; presence accepts boolean `eq` and `ne`.
 
-Backend and core: Python 3.12+, FastAPI, Uvicorn, Pydantic, psutil,
-PyYAML, pytest, Ruff.
+- `cpu_affinity` restricts eligible CPUs. It does not reserve capacity or
+  guarantee performance.
+- `nice` changes scheduler weight. Raising the numeric nice value is commonly
+  allowed for an owned process, but restoring it downward can require
+  `CAP_SYS_NICE` or an appropriate resource limit. A denial leaves the contract
+  in ERROR with its snapshot retained.
+- `suspend` and `resume` use SIGSTOP and SIGCONT. ARC refuses to suspend PID 1,
+  itself, or its ancestor chain.
+- `cpu_quota` writes and verifies cgroups v2 `cpu.max`. It requires a writable,
+  delegated hierarchy with the CPU controller enabled.
 
-Frontend: React, TypeScript, Vite, Tailwind CSS, ESLint, Prettier.
+Contracts that want the same resource dimension for the same PID do not
+overwrite each other. The later contract remains INACTIVE with a
+`resource_conflict` outcome until the owner restores. Different dimensions,
+such as affinity and stopped state, may coexist.
 
-Contracts and persistence: YAML contract files, local structured
-logs and events, no external database.
+See [docs/contracts.md](docs/contracts.md) and
+[contracts/examples/](contracts/examples/) for the complete schema and
+validated examples.
 
-## Repository structure
+## Requirements and Compatibility
 
-```text
-.
-├── backend/            # Python packaging, ARC API, and core engine
-│   ├── pyproject.toml
-│   ├── src/arc/        # api, core, contracts, monitoring, evaluation,
-│   │                   # enforcement, restoration, observability, cli
-│   └── tests/
-├── frontend/           # React + TypeScript + Vite UI (observation only)
-├── contracts/          # live contracts directly inside, examples only
-├── contracts/examples/ # documented examples, never auto-loaded
-│                       # (see contracts/README.md)
-├── docs/               # contracts, development, os-concepts, demo guides
-└── scripts/            # Helper scripts (added as needed)
-```
+- Python 3.12 or newer.
+- Node.js 20 or newer with npm.
+- Linux for enforcement. WSL2 Ubuntu supports the affinity and signal demos.
+- Process ownership or relevant capabilities for each requested operation.
+- Writable delegated cgroups v2 CPU controller for `cpu_quota`.
 
-## Prerequisites
+Windows and macOS can run portable tests and build the frontend, but the real
+adapter refuses enforcement there. WSL telemetry describes the Linux VM, not
+native Windows processes.
 
-- Python 3.12+
-- Node.js 20+ with npm
-- Git
-- Linux for actual resource enforcement (see platform note)
+## Installation and Quick Start
 
-## Backend development
+Clone and install from inside Linux or the WSL Linux filesystem:
 
 ```bash
-cd backend
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-# source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn arc.api.app:app --reload --port 8000
+git clone https://github.com/shikhar-sahay/arc.git
+cd arc
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -e 'backend[dev]'
+cd frontend
+npm ci
+cd ..
 ```
 
-Health check: `GET http://localhost:8000/api/health`
+Start the backend from the repository root:
 
-Full local run (Linux): start `scripts/demo_cpu_worker.py` in one
-terminal, copy an example into `contracts/`, then `arc run` from
-`backend/`. See `docs/demo.md` for the reproducible lifecycle demo.
+```bash
+ARC_CONTRACTS_DIR=contracts backend/.venv/bin/uvicorn arc.api.app:app \
+  --host 127.0.0.1 --port 8000
+```
 
-## Frontend development
+In a second terminal:
 
 ```bash
 cd frontend
-npm install
-npm run dev
+npm run dev -- --host 0.0.0.0
 ```
 
-The Vite dev server runs on `http://localhost:5173` and proxies `/api`
-and `/ws` to the backend on port 8000. `VITE_ARC_API_URL` may specify a
-different backend origin for both REST and WebSocket traffic.
+Open the Vite URL, normally `http://localhost:5173`. Check backend health with
+`curl http://127.0.0.1:8000/api/health`.
 
-The four-page interface provides an overview, contract CRUD and reload,
-process observation, and structured events. It reports REST failures and
-WebSocket connection state explicitly. The backend remains authoritative
-for schema validation and policy behavior.
-
-## Testing and quality
-
-Backend (from `backend/`):
+Headless operation needs no FastAPI or React:
 
 ```bash
-pytest
+backend/.venv/bin/arc validate contracts/examples
+backend/.venv/bin/arc run --contracts contracts --interval 2
+```
+
+## Dashboard Guide
+
+- **Overview:** live telemetry, logical CPUs, contract counts, recent decisions,
+  and capability reporting.
+- **Contracts:** create, inspect, edit, enable, disable, delete, reload, and
+  recover YAML-backed policies. Protected lifecycles reject unsafe mutation.
+- **Processes:** read-only process data with nice, affinity, and ARC ownership.
+- **Resource Lab:** bounded Linux workers, genuine throughput measurements, and
+  a real ARC affinity policy.
+- **Audit Log:** bounded in-memory lifecycle and kernel-operation events. It is
+  not durable or tamper-proof storage.
+
+## Reproducible Demonstration
+
+After starting both services:
+
+1. Open **Resource Lab**, choose 6 to 10 workers, and start the scenario.
+2. Observe the foreground baseline, then enable the policy and apply pressure.
+3. Wait for ACTIVE and note the background PIDs.
+4. Independently run `taskset -pc <PID>` or inspect `/proc/<PID>/status`.
+5. Observe throughput while affinity is restricted.
+6. Lower pressure, wait for INACTIVE, and verify that allowed and original CPU
+   sets agree.
+7. Open **Audit Log**, then stop the scenario only after restoration.
+
+For the optional suspension demo, copy
+`contracts/examples/resource-lab-suspend.yaml` into `contracts/`, reload it,
+and enable it during Resource Lab pressure. A separate `suspension-target`
+process is stopped while background workers retain pressure. Verify `T` and the
+later resumed state with:
+
+```bash
+ps -p <PID> -o pid,ppid,stat,args
+```
+
+See [docs/FACULTY_DEMO.md](docs/FACULTY_DEMO.md) for the full presentation and
+recovery sequence.
+
+## Experimental Evidence
+
+One independent WSL2 rehearsal observed:
+
+| Phase | Foreground throughput |
+| --- | ---: |
+| Baseline | approximately 16.48 million operations/second |
+| Contention | approximately 10.09 million operations/second |
+| ARC affinity active | approximately 15.78 million operations/second |
+| Recovery | approximately 16.80 million operations/second |
+
+Four background processes were independently observed on CPU 11 with
+`taskset -pc`, then restored to their exact original `0-11` masks. A separate
+suspension contract produced real `R+` to `T+` to `R+` transitions for four
+controlled Python processes. These are observations from one rehearsal, not
+guaranteed benchmark results.
+
+## Testing
+
+```bash
+cd backend
 ruff check .
 ruff format --check .
+pytest -v
+arc validate ../contracts/examples
 ```
 
-Frontend (from `frontend/`):
+Opt-in real Linux Resource Lab test:
 
 ```bash
+ARC_RUN_LINUX_E2E=1 pytest -v tests/test_resource_lab_linux_e2e.py
+```
+
+Frontend checks:
+
+```bash
+cd frontend
 npm run lint
 npm run format:check
 npm run build
 ```
 
-## Platform note
+See [docs/testing.md](docs/testing.md) for evidence categories and skips.
 
-ARC targets Linux for actual resource management. Non-Linux systems
-(Windows, macOS) are supported for development of portable layers: API,
-domain models, UI, and unit tests. Linux specific enforcement requires
-Linux and appropriate permissions. ARC never simulates a successful
-resource operation: unsupported or refused operations are reported as
-failures.
+## Known Limitations
 
-## Current project status
+- Runtime snapshots and audit events are in memory. Graceful SIGINT or SIGTERM
+  invokes restoration, but SIGKILL, host failure, or WSL shutdown cannot.
+- Nice restoration may fail without `CAP_SYS_NICE` or a suitable resource limit.
+- cgroups quota is unavailable in many WSL configurations without delegation.
+- Static CPU lists in hand-written contracts are host-specific.
+- There is no authentication, database, privileged helper, or durable recovery
+  journal.
 
-Implemented:
+See [docs/limitations.md](docs/limitations.md) for operational consequences.
 
-- authoritative initial contract schema (version 1) with YAML
-  validation and loading
-- read-only system and process monitoring built on psutil
-- aggregate and logical-core CPU telemetry for the operations interface
-- process target resolution without persisted PIDs
-- trigger evaluation with monotonic duration handling and hysteresis
-- condition metrics `system.cpu.percent`, `system.memory.percent`, and
-  `target.process.present`, including duration and boolean comparisons
-- real Linux enforcement of `nice`, `cpu_affinity`, `suspend`, `resume`,
-  and cgroups v2 `cpu_quota` through explicit Linux adapter boundaries
-  (snapshot, apply in order, verify, roll back on failure)
-- exact restoration with PID plus creation-time identity checks
-- persistent runtime engine with lifecycle states, bounded event
-  history, and graceful shutdown restoration
-- contract create, update, delete, enabled toggle, validation, reload,
-  and manual ERROR reset through the API and frontend
-- API: `GET /api/health`, `GET /api/status`, `GET /api/system`,
-  `GET /api/contracts`, `GET /api/processes`, `GET /api/events`
-  (all GET endpoints read engine state, none enforce), plus `/ws` for
-  observation-only initial state and tick messages
-- headless runner (`arc run`) and contract validation CLI
-- reproducible Linux demo (`scripts/demo_cpu_worker.py`, `docs/demo.md`)
+## Project Structure
 
-Linux is required for enforcement. Raising nice values on your own
-processes usually works unprivileged, but restoring them back down may
-need privilege (`CAP_SYS_NICE`); ARC reports denials honestly instead
-of faking success. See `docs/demo.md` for the full story.
-
-## WSL demo setup
-
-Use WSL 2 with a current Linux distribution. Clone the repository inside
-the Linux filesystem, install Python 3.12+, Node.js 20+, and the backend
-development dependencies, then validate all examples:
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-arc validate ../contracts/examples
+```text
+ARC/
+|-- backend/
+|   |-- src/arc/        # engine, API, adapters, and Resource Lab
+|   `-- tests/          # deterministic and Linux integration tests
+|-- frontend/           # React, TypeScript, Vite interface
+|-- contracts/examples/ # validated examples, not automatically loaded
+|-- docs/               # contracts, testing, demos, and limitations
+|-- scripts/            # bounded terminal fallback workloads
+|-- ARCHITECTURE.md
+`-- README.md
 ```
 
-For a reproducible run, follow `docs/demo.md`: start the demo worker,
-copy the chosen example into `contracts/`, run `arc run`, and stop with
-Ctrl+C to exercise restoration. Signal operations require ownership of
-the target. Lowering a nice value can require `CAP_SYS_NICE`. CPU quota
-requires a writable delegated cgroups v2 subtree. ARC does not invoke
-sudo or bypass a denial.
+## Future Work
 
-## Academic context
+Potential future work includes a durable recovery journal, startup
+reconciliation, richer delegated-cgroup discovery, and compound conditions.
+These are not implemented today.
 
-ARC is a university Operating Systems course project exploring the
-policy and orchestration layer above existing Linux resource mechanisms.
+## License and Academic Context
+
+ARC is an Operating Systems academic project exploring policy and restoration
+above existing Linux mechanisms. It is licensed under the [MIT License](LICENSE).

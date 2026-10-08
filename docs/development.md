@@ -31,8 +31,10 @@ Health check: `GET http://localhost:8000/api/health`
 Other endpoints: `GET /api/status`, `GET /api/system`,
 `GET /api/contracts`, `GET /api/processes?limit=100` (limit must be 1
 to 1000), `GET /api/events?limit=100` (limit must be 1 to 500, newest
-first). Endpoints only read engine state; the engine loop runs in
-lifespan and enforces nothing per request.
+first), and `GET /api/resource-lab`. GET endpoints only read cached state;
+the engine loop runs in lifespan and enforces nothing per request. Contract
+CRUD, lifecycle reset, reload, and Resource Lab controls use explicit mutating
+requests.
 
 ## Headless engine
 
@@ -87,6 +89,10 @@ Backend (from `backend/`):
 pytest
 ```
 
+See [testing.md](testing.md) for the opt-in real Linux adapter and Resource Lab
+integration tests. Portable tests use deterministic fake adapters and do not
+prove kernel enforcement.
+
 ## Linting and formatting
 
 Backend (from `backend/`):
@@ -128,7 +134,7 @@ Enforcement notes for Linux runs:
 - CPU affinity on your own processes is usually reversible without
   privilege, within cpuset limits. Always match the `cpus` list to the
   host (`nproc`).
-- Unit tests use the in-memory fake adapter and never touch real
-  scheduling state. `tests/test_linux_integration.py` is the one
-  exception: it runs only on Linux, operates solely on a spawned child
-  process, and restores everything before terminating the child.
+- Unit tests use the in-memory fake adapter and never touch real scheduling
+  state. Linux integration tests operate solely on controlled child processes
+  and restore them before cleanup. The measured Resource Lab suite is opt-in
+  because it intentionally creates sustained CPU load.

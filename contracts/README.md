@@ -13,3 +13,6 @@ Validate any contract before use:
 cd backend
 arc validate ../contracts/examples/interactive-session-relief.yaml
 ```
+
+See [Contract Reference](../docs/contracts.md) for the complete schema,
+operators, lifecycle semantics, actions, and permission limitations.

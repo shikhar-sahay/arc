@@ -1,9 +1,9 @@
 # Demo (works on Linux)
 
-This demonstrates the full ARC lifecycle on a real process: condition,
-evaluation, snapshot, modification, ACTIVE, restore condition, exact
-restoration, and a logged trail. It needs Linux. Read-only parts work
-anywhere, enforcement does not.
+The supported primary demonstration is the GUI-driven Resource Lab described
+in [FACULTY_DEMO.md](FACULTY_DEMO.md). It uses reversible CPU affinity on
+controlled child processes. This page retains a smaller headless example and
+explains why nice values are not a suitable unprivileged restoration demo.
 
 ## What you need
 
@@ -24,10 +24,11 @@ anywhere, enforcement does not.
 4. Watch events: `contract_activating`, `resource_action_applied`,
    `contract_activated`, later `contract_restoring`, `resource_restored`,
    `contract_restored`.
-5. In another terminal, confirm with `ps -o pid,ni,comm -p <PID>`: nice
-   rises to 10 during high load and returns to its original value
-   during idle, while the same PID stays alive throughout.
-6. Stop ARC with Ctrl+C. ACTIVE contracts restore on exit. Remove
+5. In another terminal, confirm with `ps -o pid,ni,comm -p <PID>` that nice
+   rises to 10. On an ordinary unprivileged account, restoration to 0 is
+   expected to be denied by Linux.
+6. Stop ARC with Ctrl+C. It attempts restoration and exits nonzero if cleanup
+   is incomplete. Remove
    `contracts/interactive-session-relief.yaml` afterwards so the demo
    policy is not live by accident.
 
@@ -39,8 +40,6 @@ raises priority and the kernel may refuse it without privilege
 (`CAP_SYS_NICE`, typically root). If that happens, ARC does the honest
 thing: restoration fails explicitly, the contract goes to ERROR with a
 `restoration_failed` event, and nothing is faked. For the complete
-round trip, run the demo with appropriate privilege (for example
-`sudo`). Alternatively, demonstrate the reversible-without-privilege
-path with CPU affinity on your own processes, after editing the CPU
-list in `contracts/examples/memory-pressure-relief.yaml` to match your
-host (`nproc` shows available CPUs).
+round trip, the process needs `CAP_SYS_NICE` or an equivalent permitted
+resource limit. ARC never invokes `sudo` or elevates itself. Use Resource Lab's
+CPU-affinity scenario for the reversible, unprivileged presentation path.

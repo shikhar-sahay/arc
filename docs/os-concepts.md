@@ -9,8 +9,9 @@ ARC observes and acts on running Linux processes: their identities,
 lifetimes, resource usage, and tunable properties. PIDs are ephemeral
 (the kernel reuses them), so ARC contracts match on process metadata
 such as executable name and command line instead of persisted PIDs, and
-the monitor re-resolves matches on every cycle. Snapshots pin PID plus
-process creation time, and restoration re-verifies the pair so a reused
+the monitor re-resolves matches on every cycle. Snapshots pin PID plus kernel
+start-time ticks from `/proc/<pid>/stat`, and restoration re-verifies the pair
+so a reused
 PID is never written to. The OS creates,
 schedules, and reaps processes. ARC coordinates policy on top of that
 lifecycle without replacing it.
@@ -43,7 +44,8 @@ activation explicitly instead of being silently masked.
 Control groups organize processes into hierarchies and provide kernel
 mechanisms for accounting and limiting resources such as CPU, memory, and
 I/O. ARC interfaces with cgroups v2 via `cpu.max` quota leases under a
-dedicated slice (`arc.slice`), attaching target PIDs to managed groups
+dedicated `arc/arc-<pid>` directory below the configured hierarchy, attaching
+target PIDs to managed groups
 during activation and removing quotas upon contract restoration. When
 cgroups v2 hierarchy is not writable or unavailable, ARC reports this
 capability status transparently without faking support.

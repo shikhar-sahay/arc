@@ -65,8 +65,10 @@ enforcement policy.
   in-memory fake for tests, platform capability reporting.
 - `observability/`: bounded in-memory event history plus logging.
   No event bus.
-- `api/`: FastAPI interface that only reads engine state (health,
-  status, system, contracts, processes, events).
+- `api/`: FastAPI observation plus explicit contract and Resource Lab
+  mutations. GET and WebSocket operations never enforce.
+- `lab/`: bounded demonstration workers and measured workload state. It never
+  applies resource controls directly.
 - `cli/`: contract validation plus the headless `arc run` engine.
 
 Core must stay headless-capable: anything the web UI can do should also be
@@ -77,8 +79,9 @@ possible without it.
 Contract YAML is declarative configuration: identity, target, trigger,
 actions, and restore condition. CRUD and enabled toggles write only this
 configuration, and reload replaces definitions atomically. Protected
-contracts cannot be changed or removed while activating, active, or
-restoring. Runtime state is transient and per contract: matched PIDs, duration
+contracts cannot be changed or removed while activating, active, restoring,
+or retaining recoverable snapshots in ERROR. Runtime state is transient and
+per contract: matched PIDs, duration
 timers, latest preview outcome, lifecycle state, and errors. It lives in
 `ContractRuntimeState` objects owned by the observation engine and held
 in memory only. There is no database.
@@ -126,14 +129,15 @@ fake, which never stands in for real operations.
 
 ## Snapshot, rollback, and identity safety
 
-Activation captures a `ResourceSnapshot` per target (PID, creation
-time, name, plus only the properties about to change) before any
+Activation captures a `ResourceSnapshot` per target (PID, kernel start-time
+ticks, display creation time, name, plus only the properties about to change) before any
 mutation. Mutations apply in contract order and PID order with
 read-back verification. Any failure rolls the journal back in reverse
 and lands the contract in ERROR with the rollback outcome recorded
 (clean versus incomplete, naming each failed resource).
 
-Restoration re-identifies each PID by creation time first. Exited
+Restoration re-identifies each Linux PID by `/proc/<pid>/stat` start-time ticks.
+This avoids WSL wall-clock boot-time drift in derived timestamps. Exited
 processes need no restoration and retire quietly. A reused PID is stale:
 it is never touched and the contract goes to ERROR with a
 restoration failure. Errored contracts never retry on their own. Manual reset
@@ -145,7 +149,8 @@ verification.
 Ownership is deterministic per process lifetime and resource dimension. Nice,
 CPU affinity, cgroups CPU quota, and process stopped state are independent
 dimensions. Suspend and resume share the stopped-state dimension. Before
-activation, the engine checks all ACTIVE or RESTORING snapshots while holding
+activation, the engine checks every retained owner snapshot, including one
+latched in ERROR, while holding
 the same lock used for activation and restoration.
 
 If another contract owns the same resource for a matching PID, activation is

@@ -34,8 +34,7 @@ restore: { ... }
   but never evaluate toward activation.
 - `target`: workload selection (process targets only, see below).
 - `trigger`: condition that starts an episode (see below).
-- `actions`: one or more intended actions (see below). Actions declare
-  intent only. Enforcement is not implemented yet.
+- `actions`: one or more enforced Linux resource actions (see below).
 - `restore`: restoration condition that ends an episode (see below).
 
 Unknown fields are rejected so typos fail loudly.
@@ -102,7 +101,9 @@ flap when usage hovers near it. Two thresholds keep the episode stable.
 
 - `nice`: `{type: nice, value: 10}`. Value must fit the Linux nice range
   of -20 to 19. Executed on Linux: the engine snapshots the
-  current value, sets the new one, and reads it back to verify.
+  current value, sets the new one, and reads it back to verify. Restoring to a
+  numerically lower value may require `CAP_SYS_NICE` or a suitable
+  `RLIMIT_NICE`. A denial leaves the snapshot retained in ERROR.
 - `cpu_affinity`: `{type: cpu_affinity, cpus: [0, 1]}`. The list must be
   non-empty, with unique non-negative CPU indexes. Executed on
   Linux with read-back verification. Invalid or disallowed CPUs fail
@@ -119,7 +120,8 @@ flap when usage hovers near it. Two thresholds keep the episode stable.
   stopped, restoration restores that stopped state via SIGSTOP.
 - `cpu_quota`: `{type: cpu_quota, quota_percent: 50.0}`. Allocates a CPU quota
   lease via cgroups v2 (`cpu.max`). Supported when cgroup v2 hierarchy is
-  mounted with the `cpu` controller enabled.
+  mounted with the `cpu` controller enabled and a writable delegation.
+  Detecting cgroups v2 alone is not sufficient.
 
 Malformed actions fail validation with a clear error. Actions apply in
 contract order, and multi-process targets are visited in PID order, so
@@ -131,7 +133,7 @@ The `restore` field is a CONDITION: it decides when an active contract
 should stop applying. It is not a snapshot of resource values. Before
 enforcement, ARC records prior values (for example the original nice
 value) into an in-memory `ResourceSnapshot` keyed by PID plus process
-creation time, and writes back those recorded values on restoration,
+kernel start-time ticks, and writes back those recorded values on restoration,
 never assumed defaults. Restoration verifies by reading values back.
 
 ## Complete example
