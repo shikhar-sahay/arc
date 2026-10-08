@@ -1,0 +1,21 @@
+version: 1
+id: resource-lab-suspend
+name: Resource Lab Process Suspension
+description: Stop only controlled background workers during sustained CPU pressure.
+enabled: false
+target:
+  type: process
+  match:
+    command_contains: arc-resource-lab-background
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 20
+  for_seconds: 3
+actions:
+  - type: suspend
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 10
+  for_seconds: 3

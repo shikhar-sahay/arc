@@ -28,7 +28,52 @@ npm run dev -- --host 0.0.0.0
 Open the printed frontend URL. Measurements describe the WSL Linux virtual
 machine, not native Windows processes.
 
-## Preflight
+## Primary GUI Demonstration
+
+The Resource Lab is the primary demonstration. It creates only backend-owned,
+uniquely tagged Linux child processes. The foreground worker continuously
+reports measured operations per second. Background workers remain idle during
+the baseline phase and perform the same bounded computation during pressure.
+
+1. Open **Resource Lab** and select 6 to 10 background workers. Use fewer on a
+   smaller WSL VM.
+2. Select **Start Scenario**. Wait for a stable foreground baseline.
+3. Select **Enable Policy**. This enables the normal persisted
+   `resource-lab-cpu-contention` contract. It does not apply resource controls
+   directly.
+4. Select **Apply Pressure**. Watch real system CPU, foreground throughput,
+   background throughput, target PIDs, and the trigger-duration progress.
+5. After three sustained seconds above 20 percent CPU, verify that the contract
+   becomes ACTIVE and every background PID reports the policy CPU as its
+   allowed set.
+6. Select **Lower Pressure**. Background processes remain alive but idle, so
+   ARC can verify their identities and restore their exact original affinity.
+7. Wait for INACTIVE. Confirm that Current CPUs and Original CPUs agree, then
+   open **Audit Log** to show snapshot, enforcement, verification, restoration,
+   and lifecycle events.
+8. Select **Stop Scenario**. ARC refuses this operation while resources remain
+   owned, so workers cannot be discarded before recovery.
+
+The throughput comparison is measured, not synthesized. Scheduling noise can
+change the direction and magnitude of the foreground result. CPU affinity
+isolates eligible processors but does not reserve capacity or impose a quota.
+
+Independent verification remains optional:
+
+```bash
+taskset -pc <background-pid>
+grep -E 'State|Cpus_allowed_list' /proc/<background-pid>/status
+```
+
+For the secondary workbench, copy either
+`contracts/examples/resource-lab-suspend.yaml` or
+`contracts/examples/resource-lab-affinity-conflict.yaml` into `contracts/`,
+reload on the Contracts page, and enable it only while Resource Lab workers are
+running. The suspension policy exercises verified SIGSTOP and SIGCONT. The
+conflict policy demonstrates that a second affinity owner defers rather than
+overwriting the active policy.
+
+## Terminal Fallback Preflight
 
 ```bash
 cd ~/projects/arc

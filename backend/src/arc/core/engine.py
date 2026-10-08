@@ -258,7 +258,7 @@ class ObservationEngine:
             if current.enabled == enabled:
                 return current
             runtime = self._runtimes[contract_id]
-            if runtime.lifecycle in (
+            if runtime.snapshots or runtime.lifecycle in (
                 LifecycleState.ACTIVATING,
                 LifecycleState.ACTIVE,
                 LifecycleState.RESTORING,
@@ -280,10 +280,14 @@ class ObservationEngine:
         """
         with self._lock:
             runtime = self._runtimes.get(contract.id)
-            if runtime is not None and runtime.lifecycle in (
-                LifecycleState.ACTIVE,
-                LifecycleState.ACTIVATING,
-                LifecycleState.RESTORING,
+            if runtime is not None and (
+                runtime.snapshots
+                or runtime.lifecycle
+                in (
+                    LifecycleState.ACTIVE,
+                    LifecycleState.ACTIVATING,
+                    LifecycleState.RESTORING,
+                )
             ):
                 raise ValueError(
                     f"cannot modify contract {contract.id} while in state {runtime.lifecycle.value}"

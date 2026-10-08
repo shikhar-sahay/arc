@@ -1,0 +1,22 @@
+version: 1
+id: resource-lab-affinity-conflict
+name: Resource Lab Affinity Conflict
+description: Demonstrate resource ownership deferral for the controlled background workers.
+enabled: false
+target:
+  type: process
+  match:
+    command_contains: arc-resource-lab-background
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 20
+  for_seconds: 3
+actions:
+  - type: cpu_affinity
+    cpus: [0]
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 10
+  for_seconds: 3

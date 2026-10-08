@@ -54,15 +54,19 @@ def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) 
         assert client.post("/api/resource-lab/policy", json={"enabled": True}).status_code == 200
 
         baseline = _average_rates(client)
+        contention: tuple[float, float] | None = None
+        enforced: tuple[float, float] | None = None
 
         for cycle in range(3):
             assert client.post("/api/resource-lab/pressure", json={"high": True}).status_code == 200
-            contention = _average_rates(client) if cycle == 0 else None
+            if cycle == 0:
+                contention = _average_rates(client)
             active = _wait_for(client, "active")
             background = [item for item in active["workloads"] if item["role"] == "background"]
             assert active["background_operations_per_second"] > 0
             assert all(item["affinity"] == [active["policy_cpu"]] for item in background)
-            enforced = _average_rates(client) if cycle == 0 else None
+            if cycle == 0:
+                enforced = _average_rates(client)
 
             assert (
                 client.post("/api/resource-lab/pressure", json={"high": False}).status_code == 200

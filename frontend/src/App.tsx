@@ -181,6 +181,7 @@ export default function App() {
       }
       if (tab === "contracts") void fetchContracts();
       if (tab === "processes") void fetchProcesses();
+      if (tab === "lab" && wsStatus !== "connected") void fetchTelemetry();
       if (tab === "events") void fetchEvents();
     };
     const timer = window.setInterval(refresh, tab === "overview" ? 4000 : 5000);
@@ -356,7 +357,9 @@ export default function App() {
             onRefresh={fetchEvents}
           />
         )}
-        {tab === "lab" && <ResourceLabPage />}
+        {tab === "lab" && (
+          <ResourceLabPage telemetry={telemetry} cpuHistory={cpuHistory} />
+        )}
       </div>
     </div>
   );

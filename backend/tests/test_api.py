@@ -133,6 +133,33 @@ def test_events_endpoint_rejects_bad_limits(tmp_path: Path) -> None:
             assert client.get(f"/api/events?limit={bad}").status_code == 422
 
 
+def test_reset_reports_failed_recovery_and_retries_snapshot(tmp_path: Path) -> None:
+    """Reset stays truthful while exact restoration remains denied."""
+    from tests.conftest import make_fake
+
+    fake = make_fake()
+    write_contract(tmp_path, "relief.yaml")
+    with _client(tmp_path, adapter=fake) as client:
+        _drive(client, cpu=80.0, now=0.0)
+        _drive(client, cpu=80.0, now=5.0)
+        fake.deny_on("set_nice", 50)
+        _drive(client, cpu=10.0, now=10.0)
+        _drive(client, cpu=10.0, now=15.0)
+
+        denied = client.post("/api/contracts/compile-relief/reset")
+        assert denied.status_code == 409
+        status = client.get("/api/contracts").json()["contracts"][0]
+        assert status["lifecycle"] == "error"
+        assert status["active_targets"][0]["pid"] == 50
+
+        fake.deny_sets.clear()
+        recovered = client.post("/api/contracts/compile-relief/reset")
+        assert recovered.status_code == 200
+        status = client.get("/api/contracts").json()["contracts"][0]
+        assert status["lifecycle"] == "inactive"
+        assert status["active_targets"] == []
+
+
 def test_contracts_endpoint_reports_invalid_files(tmp_path: Path) -> None:
     """Invalid contract files surface as errors, not silent skips."""
     (tmp_path / "bad.yaml").write_text("version: [broken\n", encoding="utf-8")

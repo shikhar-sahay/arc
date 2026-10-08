@@ -3,11 +3,16 @@ import { Activity, Gauge, Play, RotateCcw, Shield, Square } from "lucide-react";
 import { MiniSparkline } from "../components/MiniSparkline";
 import { api } from "../lib/api";
 import { formatCpuAffinity } from "../lib/utils";
-import { ResourceLabState } from "../types";
+import { ResourceLabState, SystemTelemetry } from "../types";
 
 const HISTORY_LIMIT = 90;
 
-export function ResourceLabPage() {
+interface Props {
+  telemetry: SystemTelemetry | null;
+  cpuHistory: number[];
+}
+
+export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
   const [state, setState] = useState<ResourceLabState | null>(null);
   const [workers, setWorkers] = useState(4);
   const [busy, setBusy] = useState(false);
@@ -135,6 +140,12 @@ export function ResourceLabPage() {
 
       <div className="lab-summary">
         <div>
+          <span>System CPU</span>
+          <strong>
+            {telemetry ? `${telemetry.cpu_percent.toFixed(1)}%` : "unavailable"}
+          </strong>
+        </div>
+        <div>
           <span>Foreground Rate</span>
           <strong>
             {Math.round(
@@ -177,6 +188,10 @@ export function ResourceLabPage() {
             </span>
           </div>
           <div className="lab-chart-row">
+            <div>
+              <span>System CPU, 0 to 100%</span>
+              <MiniSparkline data={cpuHistory} max={100} color="var(--cpu)" />
+            </div>
             <div>
               <span>Foreground</span>
               <MiniSparkline

@@ -408,7 +408,7 @@ textarea:focus-visible {
 }
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1px;
   border: 1px solid var(--soft);
   border-radius: 7px;
@@ -1125,7 +1125,7 @@ textarea:focus-visible {
 }
 .lab-chart-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 18px;
   padding: 18px;
 }

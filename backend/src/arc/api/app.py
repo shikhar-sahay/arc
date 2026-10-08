@@ -397,10 +397,14 @@ def create_app(
         engine: ObservationEngine = app.state.engine
 
         runtime = engine.runtime_for(contract_id)
-        if runtime is not None and runtime.lifecycle in (
-            LifecycleState.ACTIVE,
-            LifecycleState.ACTIVATING,
-            LifecycleState.RESTORING,
+        if runtime is not None and (
+            runtime.snapshots
+            or runtime.lifecycle
+            in (
+                LifecycleState.ACTIVE,
+                LifecycleState.ACTIVATING,
+                LifecycleState.RESTORING,
+            )
         ):
             detail_msg = (
                 f"cannot update contract {contract_id} while in state {runtime.lifecycle.value}"
@@ -430,10 +434,14 @@ def create_app(
         engine: ObservationEngine = app.state.engine
 
         runtime = engine.runtime_for(contract_id)
-        if runtime is not None and runtime.lifecycle in (
-            LifecycleState.ACTIVE,
-            LifecycleState.ACTIVATING,
-            LifecycleState.RESTORING,
+        if runtime is not None and (
+            runtime.snapshots
+            or runtime.lifecycle
+            in (
+                LifecycleState.ACTIVE,
+                LifecycleState.ACTIVATING,
+                LifecycleState.RESTORING,
+            )
         ):
             detail_msg = (
                 f"cannot delete contract {contract_id} while in state {runtime.lifecycle.value}"
