@@ -293,6 +293,37 @@ export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
           </table>
         </div>
       </section>
+      <section className="panel lab-workbench">
+        <div className="panel-header">
+          <div className="panel-title">Resource-Control Workbench</div>
+          <span className="panel-subtle">
+            Restricted to Resource Lab-owned processes
+          </span>
+        </div>
+        <div className="lab-workbench-grid">
+          <div>
+            <strong>CPU Affinity</strong>
+            <span>
+              The installed policy narrows background workers and restores their
+              captured CPU sets.
+            </span>
+          </div>
+          <div>
+            <strong>Process Suspension</strong>
+            <span>
+              Load the disabled resource-lab-suspend example in Contracts to verify
+              SIGSTOP and SIGCONT.
+            </span>
+          </div>
+          <div>
+            <strong>Conflict Protection</strong>
+            <span>
+              Load resource-lab-affinity-conflict to observe resource_conflict
+              deferral without a kernel overwrite.
+            </span>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

@@ -1151,6 +1151,30 @@ textarea:focus-visible {
   color: var(--danger) !important;
   overflow-wrap: anywhere;
 }
+.lab-workbench {
+  margin-top: 12px;
+}
+.lab-workbench-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.lab-workbench-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 13px 15px;
+  border-right: 1px solid var(--soft);
+}
+.lab-workbench-grid > div:last-child {
+  border-right: 0;
+}
+.lab-workbench-grid strong {
+  font-size: 12px;
+}
+.lab-workbench-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
 
 @media (max-width: 900px) {
   .lab-summary {
@@ -1161,6 +1185,16 @@ textarea:focus-visible {
   }
   .lab-grid {
     grid-template-columns: 1fr;
+  }
+  .lab-workbench-grid {
+    grid-template-columns: 1fr;
+  }
+  .lab-workbench-grid > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--soft);
+  }
+  .lab-workbench-grid > div:last-child {
+    border-bottom: 0;
   }
 }
 
