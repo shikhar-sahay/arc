@@ -1,0 +1,24 @@
+# Copy to contracts/faculty-affinity-demo.yaml only for the controlled demo.
+version: 1
+id: faculty-affinity-demo
+name: Faculty Affinity Demonstration
+description: Constrain only the controlled faculty-demo target during measured load.
+enabled: true
+target:
+  type: process
+  match:
+    executable: python3
+    command_contains: arc-faculty-demo-target
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 20
+  for_seconds: 3
+actions:
+  - type: cpu_affinity
+    cpus: [0]
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 10
+  for_seconds: 3

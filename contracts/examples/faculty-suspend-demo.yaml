@@ -1,0 +1,23 @@
+# Use separately from the affinity demo. Copy to contracts/ only when presenting Demo C.
+version: 1
+id: faculty-suspend-demo
+name: Faculty Suspend Demonstration
+description: Suspend the controlled target during load and resume its prior state on restoration.
+enabled: true
+target:
+  type: process
+  match:
+    executable: python3
+    command_contains: arc-faculty-demo-target
+trigger:
+  metric: system.cpu.percent
+  operator: gt
+  value: 20
+  for_seconds: 3
+actions:
+  - type: suspend
+restore:
+  metric: system.cpu.percent
+  operator: lt
+  value: 10
+  for_seconds: 3
