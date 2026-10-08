@@ -27,6 +27,18 @@ def _wait_for(client: TestClient, lifecycle: str, timeout: float = 20.0) -> dict
     pytest.fail(f"contract did not reach {lifecycle}: {last}")
 
 
+def _average_rates(client: TestClient, seconds: float = 2.0) -> tuple[float, float]:
+    foreground: list[float] = []
+    background: list[float] = []
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        sample = client.get("/api/resource-lab").json()
+        foreground.append(sample["foreground_operations_per_second"])
+        background.append(sample["background_operations_per_second"])
+        time.sleep(0.25)
+    return sum(foreground) / len(foreground), sum(background) / len(background)
+
+
 def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) -> None:
     """GUI API to engine to kernel and back, repeated three times."""
     with TestClient(
@@ -41,12 +53,16 @@ def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) 
         }
         assert client.post("/api/resource-lab/policy", json={"enabled": True}).status_code == 200
 
-        for _ in range(3):
+        baseline = _average_rates(client)
+
+        for cycle in range(3):
             assert client.post("/api/resource-lab/pressure", json={"high": True}).status_code == 200
+            contention = _average_rates(client) if cycle == 0 else None
             active = _wait_for(client, "active")
             background = [item for item in active["workloads"] if item["role"] == "background"]
             assert active["background_operations_per_second"] > 0
             assert all(item["affinity"] == [active["policy_cpu"]] for item in background)
+            enforced = _average_rates(client) if cycle == 0 else None
 
             assert (
                 client.post("/api/resource-lab/pressure", json={"high": False}).status_code == 200
@@ -54,5 +70,12 @@ def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) 
             restored = _wait_for(client, "inactive")
             background = [item for item in restored["workloads"] if item["role"] == "background"]
             assert all(item["affinity"] == original[item["pid"]] for item in background)
+
+        recovery = _average_rates(client)
+        print(
+            "Resource Lab rates (foreground, background ops/s): "
+            f"baseline={baseline}, contention={contention}, "
+            f"enforced={enforced}, recovery={recovery}"
+        )
 
         assert client.post("/api/resource-lab/stop").status_code == 200
