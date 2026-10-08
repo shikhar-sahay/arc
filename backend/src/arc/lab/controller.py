@@ -46,16 +46,22 @@ class ResourceLabController:
                 raise ResourceLabError(f"worker count must be between 1 and {maximum}")
             self._directory = Path(tempfile.mkdtemp(prefix="arc-resource-lab-"))
             self._token = uuid.uuid4().hex
-            self._write_mode("low")
-            self._spawn("foreground", 0)
-            for index in range(workers):
-                self._spawn("background", index)
-            self._mode = "baseline"
-            foreground_pid = next(pid for pid, role in self._roles.items() if role == "foreground")
-            foreground = psutil.Process(foreground_pid)
-            foreground.cpu_affinity([self._original_affinity[foreground_pid][0]])
-            time.sleep(0.15)
-            return self.status()
+            try:
+                self._write_mode("low")
+                self._spawn("foreground", 0)
+                for index in range(workers):
+                    self._spawn("background", index)
+                self._mode = "baseline"
+                foreground_pid = next(
+                    pid for pid, role in self._roles.items() if role == "foreground"
+                )
+                foreground = psutil.Process(foreground_pid)
+                foreground.cpu_affinity([self._original_affinity[foreground_pid][0]])
+                time.sleep(0.15)
+                return self.status()
+            except Exception as exc:
+                self.stop()
+                raise ResourceLabError(f"failed to start controlled workers: {exc}") from exc
 
     def set_pressure(self, high: bool) -> dict[str, object]:
         with self._lock:

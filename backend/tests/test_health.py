@@ -28,9 +28,9 @@ def test_health_content_type_is_json() -> None:
     assert "application/json" in response.headers["content-type"]
 
 
-def test_health_reports_engine_summary() -> None:
+def test_health_reports_engine_summary(tmp_path) -> None:
     """Health includes engine running state and contract counts."""
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(contracts_dir=tmp_path)) as client:
         payload = client.get("/api/health").json()
 
     assert payload["engine_running"] is True

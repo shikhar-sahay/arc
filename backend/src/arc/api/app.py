@@ -653,7 +653,6 @@ def create_app(
             install_resource_lab_contract(cpu)
             return resource_lab_payload()
         except ResourceLabError as exc:
-            app.state.resource_lab.stop()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except HTTPException:
             app.state.resource_lab.stop()
