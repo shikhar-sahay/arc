@@ -17,7 +17,7 @@ cd frontend && npm install && cd ..
 Start the backend and frontend in separate terminals:
 
 ```bash
-backend/.venv/bin/arc serve --contracts-dir contracts
+ARC_CONTRACTS_DIR=contracts backend/.venv/bin/uvicorn arc.api.app:app --host 127.0.0.1 --port 8000
 ```
 
 ```bash
