@@ -170,8 +170,13 @@ export default function App() {
   ]);
   useEffect(() => {
     const refresh = () => {
-      if (tab === "overview")
-        void Promise.all([fetchStatus(), fetchTelemetry(), fetchProcesses()]);
+      if (tab === "overview") {
+        const reads = [fetchContracts(), fetchProcesses()];
+        if (wsStatus !== "connected") {
+          reads.push(fetchStatus(), fetchTelemetry(), fetchEvents());
+        }
+        void Promise.all(reads);
+      }
       if (tab === "contracts") void fetchContracts();
       if (tab === "processes") void fetchProcesses();
       if (tab === "events") void fetchEvents();
@@ -185,6 +190,7 @@ export default function App() {
     fetchContracts,
     fetchProcesses,
     fetchEvents,
+    wsStatus,
   ]);
 
   const nav = [

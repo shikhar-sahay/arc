@@ -99,24 +99,37 @@ def _capture_snapshots(
     snapshots: list[ResourceSnapshot] = []
     leases: dict[int, CgroupLease] = {}
 
-    for target in targets:
-        identity = adapter.get_identity(target.pid)
-        cgroup_lease: CgroupLease | None = None
-        if want_cgroup and cgroup_manager is not None:
-            cgroup_lease = cgroup_manager.enter(target.pid)
-            leases[target.pid] = cgroup_lease
+    try:
+        for target in targets:
+            identity = adapter.get_identity(target.pid)
+            cgroup_lease: CgroupLease | None = None
+            if want_cgroup and cgroup_manager is not None:
+                cgroup_lease = cgroup_manager.enter(target.pid)
+                leases[target.pid] = cgroup_lease
 
-        snapshots.append(
-            ResourceSnapshot(
-                identity=identity,
-                nice=adapter.get_nice(target.pid) if want_nice else None,
-                affinity=adapter.get_affinity(target.pid) if want_affinity else None,
-                stopped=adapter.is_stopped(target.pid) if want_stopped else None,
-                cpu_quota=cgroup_lease.previous_cpu_max if cgroup_lease else None,
-                cgroup_leaf=cgroup_lease.leaf if cgroup_lease else None,
-                cgroup_origin=cgroup_lease.origin if cgroup_lease else None,
+            snapshots.append(
+                ResourceSnapshot(
+                    identity=identity,
+                    nice=adapter.get_nice(target.pid) if want_nice else None,
+                    affinity=adapter.get_affinity(target.pid) if want_affinity else None,
+                    stopped=adapter.is_stopped(target.pid) if want_stopped else None,
+                    cpu_quota=cgroup_lease.previous_cpu_max if cgroup_lease else None,
+                    cgroup_leaf=cgroup_lease.leaf if cgroup_lease else None,
+                    cgroup_origin=cgroup_lease.origin if cgroup_lease else None,
+                )
             )
-        )
+    except ResourceControlError as exc:
+        cleanup_errors: list[str] = []
+        if cgroup_manager is not None:
+            for lease in reversed(list(leases.values())):
+                try:
+                    cgroup_manager.leave(lease)
+                except ResourceControlError as cleanup_exc:
+                    cleanup_errors.append(str(cleanup_exc))
+        detail = exc.detail
+        if cleanup_errors:
+            detail += f"; cgroup cleanup failed: {'; '.join(cleanup_errors)}"
+        raise ResourceControlError(exc.operation, exc.pid, detail) from exc
     return snapshots, leases
 
 

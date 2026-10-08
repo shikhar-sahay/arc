@@ -180,6 +180,42 @@ def test_manual_reset_recovers_error() -> None:
     assert engine.reset_contract("compile-relief") is False
 
 
+def test_manual_reset_retries_incomplete_restoration_before_clearing_error() -> None:
+    engine, fake = make_engine(
+        [
+            make_contract(
+                trigger={
+                    "metric": "system.cpu.percent",
+                    "operator": "gt",
+                    "value": 50,
+                    "for_seconds": 0,
+                },
+                restore={
+                    "metric": "system.cpu.percent",
+                    "operator": "lt",
+                    "value": 20,
+                    "for_seconds": 0,
+                },
+            )
+        ]
+    )
+    observations = _obs()
+    engine.step(make_telemetry(cpu=80), observations, now=0)
+    assert fake.get_nice(50) == 10
+
+    fake.deny_on("set_nice", 50)
+    failed = engine.step(make_telemetry(cpu=10), observations, now=1)
+
+    assert failed.evaluations[0].outcome is EvaluationOutcome.RESTORATION_ERROR
+    assert engine.runtime_for("compile-relief").snapshots
+    assert engine.reset_contract("compile-relief") is False
+
+    fake.deny_sets.clear()
+    assert engine.reset_contract("compile-relief") is True
+    assert fake.get_nice(50) == 0
+    assert engine.runtime_for("compile-relief").lifecycle is LifecycleState.INACTIVE
+
+
 def test_seeded_fake_reports_configured_nice() -> None:
     """Sanity check on the shared fake seed helper."""
     fake = make_fake(pid=51, nice=5)

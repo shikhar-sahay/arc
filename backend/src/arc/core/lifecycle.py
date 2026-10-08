@@ -39,7 +39,7 @@ _ALLOWED_TRANSITIONS: dict[LifecycleState, frozenset[LifecycleState]] = {
     LifecycleState.RESTORING: frozenset(
         {LifecycleState.INACTIVE, LifecycleState.ACTIVE, LifecycleState.ERROR}
     ),
-    LifecycleState.ERROR: frozenset({LifecycleState.INACTIVE}),
+    LifecycleState.ERROR: frozenset({LifecycleState.INACTIVE, LifecycleState.RESTORING}),
 }
 
 
@@ -50,6 +50,7 @@ class EvaluationOutcome(StrEnum):
     TARGET_NOT_FOUND = "target_not_found"
     TRIGGER_PENDING = "trigger_pending"
     WOULD_ACTIVATE = "would_activate"
+    RESOURCE_CONFLICT = "resource_conflict"
     ACTIVATED = "activated"
     STILL_ACTIVE = "still_active"
     RESTORED = "restored"

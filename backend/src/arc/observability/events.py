@@ -22,6 +22,7 @@ class ArcEventType(StrEnum):
     ENGINE_STOPPED = "engine_stopped"
     CONTRACT_TRIGGER_PENDING = "contract_trigger_pending"
     CONTRACT_ACTIVATING = "contract_activating"
+    CONTRACT_CONFLICT = "contract_conflict"
     RESOURCE_SNAPSHOT_CAPTURED = "resource_snapshot_captured"
     RESOURCE_ACTION_APPLIED = "resource_action_applied"
     CONTRACT_ACTIVATED = "contract_activated"

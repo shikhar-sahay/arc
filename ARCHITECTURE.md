@@ -107,14 +107,14 @@ separate so episodes use hysteresis (activate above 75, restore below
 `ObservationEngine` is the source of truth. It owns contracts, runtime
 state, the event log, and the latest snapshots. One synchronous step
 performs a full cycle (sample, resolve, evaluate, enforce, restore)
-under a short lock; an async loop only schedules steps and never holds
+under one state lock; an async loop only schedules steps and never holds
 the lock across sleeps. HTTP GET handlers only read cached state, they
 never evaluate or enforce. Contract reload is an explicit mutation.
 The observation-only WebSocket sends initial state and periodic ticks.
 
-On graceful shutdown the engine best-effort restores every ACTIVE
-contract before exiting and reports failures instead of abandoning
-modified resources.
+On graceful shutdown the engine best-effort restores every ACTIVE contract,
+plus ERROR contracts retaining incomplete-restoration snapshots, before
+exiting. It reports failures instead of silently abandoning modified resources.
 
 ## Resource adapter boundary
 
@@ -136,8 +136,25 @@ and lands the contract in ERROR with the rollback outcome recorded
 Restoration re-identifies each PID by creation time first. Exited
 processes need no restoration and retire quietly. A reused PID is stale:
 it is never touched and the contract goes to ERROR with a
-restoration failure. Errored contracts never retry on their own; they
-wait for manual reset or restart.
+restoration failure. Errored contracts never retry on their own. Manual reset
+first retries any retained incomplete restoration and clears ERROR only after
+verification.
+
+## Resource Ownership and Conflict Semantics
+
+Ownership is deterministic per process lifetime and resource dimension. Nice,
+CPU affinity, cgroups CPU quota, and process stopped state are independent
+dimensions. Suspend and resume share the stopped-state dimension. Before
+activation, the engine checks all ACTIVE or RESTORING snapshots while holding
+the same lock used for activation and restoration.
+
+If another contract owns the same resource for a matching PID, activation is
+deferred in INACTIVE state and one `contract_conflict` event is recorded for
+that outcome transition. The satisfied contract retries on later engine ticks
+and may activate only after the owner restores or retires. It never snapshots
+or overwrites the active value. Different resource dimensions may be owned by
+different contracts on the same process because their snapshots and restoration
+writes do not overlap.
 
 ## Conceptual runtime flow
 
@@ -164,7 +181,8 @@ stateDiagram-v2
   RESTORING --> INACTIVE: restore recorded prior state, emit lifecycle events
   ACTIVATING --> ERROR: activation failed, record error, roll back
   RESTORING --> ERROR: restoration failed, record error
-  ERROR --> INACTIVE: manual reset or restart
+  ERROR --> RESTORING: recover retained snapshots
+  ERROR --> INACTIVE: manual reset when no restoration remains
 ```
 
 `ACTIVE` is reported only after every action applied and verified.
@@ -195,6 +213,11 @@ The persistent engine serializes sampling, evaluation, enforcement, and
 restoration under its state lock. API mutations use the same boundary.
 The async loop sleeps without the lock, and WebSocket broadcasting only
 reads copied engine state.
+
+One system sample and one process enumeration are shared by every contract in a
+tick. The frontend uses WebSocket telemetry while connected and avoids duplicate
+REST telemetry polling; it still refreshes cached contract lifecycle and process
+views at bounded intervals.
 
 ## Privilege and protection considerations
 

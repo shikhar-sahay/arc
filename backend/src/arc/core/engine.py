@@ -51,6 +51,13 @@ from arc.restoration.service import restore_snapshots
 logger = logging.getLogger(__name__)
 
 
+def _action_resource(action_type: str) -> str:
+    """Return the independently owned process resource for an action."""
+    if action_type in ("suspend", "resume"):
+        return "process_state"
+    return action_type
+
+
 @dataclass(frozen=True)
 class ContractStatusView:
     """Copy of one contract plus its runtime state, safe to hand out."""
@@ -170,6 +177,18 @@ class ObservationEngine:
             runtime = self._runtimes.get(contract_id)
             if runtime is None or runtime.lifecycle is not LifecycleState.ERROR:
                 return False
+            if runtime.snapshots:
+                contract = next(c for c in self._contracts if c.id == contract_id)
+                error = self._settle_snapshots(
+                    contract,
+                    runtime,
+                    reason="manual recovery",
+                    now=time.monotonic(),
+                )
+                if error is not None:
+                    return False
+                logger.info("contract %s recovered after restoration", contract_id)
+                return True
             runtime.reset_error()
             logger.info("contract %s manually reset to inactive", contract_id)
             return True
@@ -335,7 +354,9 @@ class ObservationEngine:
                 runtime = self._runtimes[contract.id]
                 # ACTIVATING and RESTORING are synchronous transitions performed
                 # while this same lock is held, so shutdown cannot observe them.
-                if runtime.lifecycle is not LifecycleState.ACTIVE:
+                if runtime.lifecycle is not LifecycleState.ACTIVE and not (
+                    runtime.lifecycle is LifecycleState.ERROR and runtime.snapshots
+                ):
                     continue
                 error = self._settle_snapshots(contract, runtime, reason="engine shutdown", now=now)
                 if error is not None:
@@ -480,6 +501,26 @@ class ObservationEngine:
     ) -> ContractEvaluation:
         by_pid = {obs.pid: obs for obs in observations}
         matched = [by_pid[pid] for pid in runtime.matched_pids if pid in by_pid]
+        conflicts = self._resource_conflicts(contract, [obs.pid for obs in matched])
+        if conflicts:
+            detail = "; ".join(conflicts)
+            evaluation = ContractEvaluation(
+                contract_id=contract.id,
+                outcome=EvaluationOutcome.RESOURCE_CONFLICT,
+                lifecycle=LifecycleState.INACTIVE,
+                trigger_raw=True,
+                trigger_satisfied=True,
+                matched_pids=list(runtime.matched_pids),
+                detail=f"activation deferred: {detail}",
+            )
+            self._emit_on_change(
+                contract.id,
+                runtime.last_outcome,
+                evaluation,
+                ArcEventType.CONTRACT_CONFLICT,
+            )
+            runtime.note_evaluated(EvaluationOutcome.RESOURCE_CONFLICT, now)
+            return evaluation
         runtime.transition_to(LifecycleState.ACTIVATING)
         self._events.record(
             ArcEventType.CONTRACT_ACTIVATING,
@@ -551,6 +592,8 @@ class ObservationEngine:
         else:
             error = result.failure.error if result.failure else "activation failed"
             rollback_errors = result.failure.rollback_errors if result.failure else []
+            if rollback_errors:
+                runtime.snapshots = list(result.snapshots)
         runtime.transition_to(LifecycleState.ERROR)
         runtime.last_error = error
         self._events.record(
@@ -582,6 +625,36 @@ class ObservationEngine:
             detail=error,
             error=error,
         )
+
+    def _resource_conflicts(self, candidate: Contract, pids: list[int]) -> list[str]:
+        """Describe active resource owners that block a candidate activation.
+
+        Ownership is per process lifetime and resource dimension. The engine lock
+        serializes this check with activation and restoration, so a resource is
+        claimed before another contract can mutate it and released only after
+        restoration completes or the process lifetime is retired.
+        """
+        wanted = {_action_resource(action.type) for action in candidate.actions}
+        pid_set = set(pids)
+        conflicts: list[str] = []
+        contract_by_id = {contract.id: contract for contract in self._contracts}
+        for owner_id, owner_runtime in self._runtimes.items():
+            if owner_id == candidate.id or owner_runtime.lifecycle not in (
+                LifecycleState.ACTIVE,
+                LifecycleState.RESTORING,
+            ):
+                continue
+            owner = contract_by_id.get(owner_id)
+            if owner is None:
+                continue
+            overlap = wanted & {_action_resource(action.type) for action in owner.actions}
+            if not overlap:
+                continue
+            owned_pids = {snapshot.identity.pid for snapshot in owner_runtime.snapshots}
+            for pid in sorted(pid_set & owned_pids):
+                for resource in sorted(overlap):
+                    conflicts.append(f"pid {pid} {resource} is owned by contract {owner_id}")
+        return conflicts
 
     def _drive_active(
         self,
@@ -677,6 +750,7 @@ class ObservationEngine:
         if not live:
             runtime.snapshots = []
             runtime.clear_activation()
+            runtime.last_error = None
             runtime.transition_to(LifecycleState.RESTORING)
             runtime.transition_to(LifecycleState.INACTIVE)
             self._events.record(
@@ -817,6 +891,7 @@ class ObservationEngine:
             )
         if result.ok:
             runtime.clear_activation()
+            runtime.last_error = None
             runtime.transition_to(LifecycleState.INACTIVE)
             self._events.record(
                 ArcEventType.CONTRACT_RESTORED,
