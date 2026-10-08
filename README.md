@@ -163,6 +163,7 @@ Implemented:
 - authoritative initial contract schema (version 1) with YAML
   validation and loading
 - read-only system and process monitoring built on psutil
+- aggregate and logical-core CPU telemetry for the operations interface
 - process target resolution without persisted PIDs
 - trigger evaluation with monotonic duration handling and hysteresis
 - condition metrics `system.cpu.percent`, `system.memory.percent`, and

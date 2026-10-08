@@ -2,6 +2,11 @@
 
 React observation and contract-management interface for ARC.
 
+The interface uses a compact desktop-style shell with Overview, Contracts,
+Processes, and Audit Log workspaces. Aggregate and per-core CPU telemetry
+comes from the backend. Client-side histories are bounded and contain only
+real samples received through REST or WebSocket.
+
 ## Commands
 
 ```bash

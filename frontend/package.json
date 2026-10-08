@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "ARC web interface: temporary scaffolding that displays engine health.",
+  "description": "ARC system resource observation and contract-management interface.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,6 +13,7 @@
     "format:write": "prettier --write ."
   },
   "dependencies": {
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

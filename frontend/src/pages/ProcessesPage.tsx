@@ -1,295 +1,332 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { ChevronDown, Cpu, RefreshCw, Search, X } from "lucide-react";
 import { ProcessItem } from "../types";
 
-interface ProcessesPageProps {
+type SortKey = "pid" | "cpu" | "memory" | "nice" | "name";
+interface Props {
   processes: ProcessItem[];
   totalObserved: number;
   loading: boolean;
   onRefresh: () => void;
 }
 
-type SortKey = "pid" | "cpu" | "mem" | "nice" | "name";
-type SortDir = "asc" | "desc";
-
 export function ProcessesPage({
   processes,
   totalObserved,
   loading,
   onRefresh,
-}: ProcessesPageProps) {
-  const [filter, setFilter] = useState("");
-  const [onlyManaged, setOnlyManaged] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>("cpu");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
+}: Props) {
+  const [query, setQuery] = useState("");
+  const [managedOnly, setManagedOnly] = useState(false);
+  const [sort, setSort] = useState<SortKey>("cpu");
+  const [descending, setDescending] = useState(true);
+  const [selected, setSelected] = useState<ProcessItem | null>(null);
+  const rows = useMemo(
+    () =>
+      processes
+        .filter((process) => {
+          const text = query.toLowerCase();
+          return (
+            (!managedOnly || process.arc_managed) &&
+            (!text ||
+              String(process.pid).includes(text) ||
+              (process.name ?? "").toLowerCase().includes(text) ||
+              (process.cmdline ?? "").toLowerCase().includes(text))
+          );
+        })
+        .sort((a, b) => {
+          const value = (item: ProcessItem): string | number =>
+            sort === "pid"
+              ? item.pid
+              : sort === "cpu"
+                ? (item.cpu_percent ?? -1)
+                : sort === "memory"
+                  ? (item.memory_percent ?? -1)
+                  : sort === "nice"
+                    ? (item.nice ?? 0)
+                    : (item.name ?? "").toLowerCase();
+          return (
+            (value(a) < value(b) ? -1 : value(a) > value(b) ? 1 : 0) *
+            (descending ? -1 : 1)
+          );
+        }),
+    [processes, query, managedOnly, sort, descending],
+  );
+  const changeSort = (key: SortKey) => {
+    if (sort === key) setDescending(!descending);
+    else {
+      setSort(key);
+      setDescending(key !== "name");
     }
-  }
-
-  function sortIndicator(key: SortKey) {
-    if (sortKey !== key) return <span className="text-slate-700 ml-1">↕</span>;
-    return (
-      <span className="text-cyan-400 ml-1">
-        {sortDir === "desc" ? "↓" : "↑"}
-      </span>
-    );
-  }
-
-  const filtered = processes
-    .filter((p) => {
-      if (onlyManaged && !p.arc_managed) return false;
-      if (!filter) return true;
-      const q = filter.toLowerCase();
-      return (
-        String(p.pid).includes(q) ||
-        (p.name ?? "").toLowerCase().includes(q) ||
-        (p.cmdline ?? "").toLowerCase().includes(q)
-      );
-    })
-    .sort((a, b) => {
-      let va: number | string = 0;
-      let vb: number | string = 0;
-      switch (sortKey) {
-        case "pid":
-          va = a.pid;
-          vb = b.pid;
-          break;
-        case "cpu":
-          va = a.cpu_percent ?? -1;
-          vb = b.cpu_percent ?? -1;
-          break;
-        case "mem":
-          va = a.memory_percent ?? -1;
-          vb = b.memory_percent ?? -1;
-          break;
-        case "nice":
-          va = a.nice ?? 0;
-          vb = b.nice ?? 0;
-          break;
-        case "name":
-          va = (a.name ?? "").toLowerCase();
-          vb = (b.name ?? "").toLowerCase();
-          break;
-      }
-      if (va < vb) return sortDir === "asc" ? -1 : 1;
-      if (va > vb) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
+  };
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+    <main className="page">
+      <header className="page-header">
         <div>
-          <h1 className="text-base font-bold text-slate-100 font-mono">
-            Linux Process Observation
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5 font-mono">
-            Read-only snapshot. Mutation is contract-driven only.
-            {totalObserved > 0 && (
-              <span className="text-slate-600 ml-1">
-                {totalObserved} processes observed, showing {processes.length}.
-              </span>
-            )}
+          <div className="page-kicker">Observation</div>
+          <h1 className="page-title">Processes</h1>
+          <p className="page-description">
+            A read-only Linux process snapshot. Resource changes remain
+            contract-driven.
           </p>
         </div>
-        <div className="flex items-center space-x-3">
-          {loading && (
-            <span className="text-xs text-slate-500 font-mono animate-pulse">
-              Updating...
-            </span>
-          )}
-          <label className="flex items-center space-x-2 text-xs font-mono text-slate-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={onlyManaged}
-              onChange={(e) => setOnlyManaged(e.target.checked)}
-              className="rounded bg-slate-900 border-slate-600 text-cyan-600 focus:ring-0 focus:ring-offset-0"
-            />
-            <span>ARC-managed only</span>
-          </label>
-          <input
-            type="text"
-            aria-label="Filter processes"
-            placeholder="Filter PID, name, cmd..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-600 w-56"
-          />
-          <button
-            onClick={onRefresh}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-mono text-slate-300 transition"
-          >
-            Refresh
+        <div className="page-actions">
+          <span className="badge">
+            {rows.length} shown · {totalObserved} observed
+          </span>
+          <button className="button" onClick={onRefresh} disabled={loading}>
+            <RefreshCw size={13} />
+            {loading ? "Refreshing" : "Refresh"}
           </button>
         </div>
+      </header>
+      <div className="toolbar">
+        <Search size={14} style={{ color: "var(--faint)" }} />
+        <input
+          className="field"
+          style={{ flex: 1, minWidth: 220 }}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search PID, process name, or command"
+          aria-label="Search processes"
+        />
+        <label className="button">
+          <input
+            type="checkbox"
+            checked={managedOnly}
+            onChange={(event) => setManagedOnly(event.target.checked)}
+          />
+          Managed by ARC
+        </label>
       </div>
-
-      {/* Process table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-x-auto">
-        <table className="w-full min-w-[900px] text-left text-xs">
-          <thead className="bg-slate-950 text-slate-500 font-mono uppercase text-[10px] border-b border-slate-800">
-            <tr>
-              <th
-                className="px-4 py-3 cursor-pointer hover:text-slate-300 select-none"
-                onClick={() => toggleSort("pid")}
-              >
-                PID {sortIndicator("pid")}
-              </th>
-              <th
-                className="px-4 py-3 cursor-pointer hover:text-slate-300 select-none"
-                onClick={() => toggleSort("name")}
-              >
-                Name {sortIndicator("name")}
-              </th>
-              <th className="px-4 py-3">Command</th>
-              <th
-                className="px-4 py-3 cursor-pointer hover:text-slate-300 select-none"
-                onClick={() => toggleSort("cpu")}
-              >
-                CPU% {sortIndicator("cpu")}
-              </th>
-              <th
-                className="px-4 py-3 cursor-pointer hover:text-slate-300 select-none"
-                onClick={() => toggleSort("mem")}
-              >
-                MEM% {sortIndicator("mem")}
-              </th>
-              <th
-                className="px-4 py-3 cursor-pointer hover:text-slate-300 select-none"
-                onClick={() => toggleSort("nice")}
-              >
-                Nice {sortIndicator("nice")}
-              </th>
-              <th className="px-4 py-3">Affinity</th>
-              <th className="px-4 py-3 text-right">ARC</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800 font-mono">
-            {filtered.length === 0 ? (
+      <div className="split-view">
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
               <tr>
-                <td
-                  colSpan={8}
-                  className="px-4 py-10 text-center text-slate-600 font-sans"
-                >
-                  {loading
-                    ? "Loading processes..."
-                    : filter || onlyManaged
-                      ? "No matching processes."
-                      : "No processes observed. Is the backend running?"}
-                </td>
+                <Sortable
+                  label="PID"
+                  value="pid"
+                  current={sort}
+                  descending={descending}
+                  onClick={changeSort}
+                />
+                <Sortable
+                  label="Process"
+                  value="name"
+                  current={sort}
+                  descending={descending}
+                  onClick={changeSort}
+                />
+                <th>Command</th>
+                <Sortable
+                  label="CPU"
+                  value="cpu"
+                  current={sort}
+                  descending={descending}
+                  onClick={changeSort}
+                />
+                <Sortable
+                  label="Memory"
+                  value="memory"
+                  current={sort}
+                  descending={descending}
+                  onClick={changeSort}
+                />
+                <Sortable
+                  label="Nice"
+                  value="nice"
+                  current={sort}
+                  descending={descending}
+                  onClick={changeSort}
+                />
+                <th>Affinity</th>
+                <th>ARC</th>
               </tr>
-            ) : (
-              filtered.map((p) => (
+            </thead>
+            <tbody>
+              {rows.map((process) => (
                 <tr
-                  key={p.pid}
-                  className={`hover:bg-slate-800/30 transition text-xs ${
-                    p.arc_managed ? "bg-cyan-950/10" : ""
-                  }`}
+                  key={process.pid}
+                  className={selected?.pid === process.pid ? "selected" : ""}
+                  onClick={() => setSelected(process)}
+                  tabIndex={0}
+                  onKeyDown={(event) =>
+                    event.key === "Enter" && setSelected(process)
+                  }
                 >
-                  <td className="px-4 py-2 font-bold text-slate-400">
-                    {p.pid}
+                  <td className="mono">{process.pid}</td>
+                  <td>
+                    <strong style={{ color: "#e3e4e6", fontWeight: 600 }}>
+                      {process.name || "Unknown"}
+                    </strong>
                   </td>
-                  <td className="px-4 py-2 text-slate-200 font-bold">
-                    {p.name ?? "-"}
+                  <td>
+                    <div className="truncate" title={process.cmdline ?? ""}>
+                      {process.cmdline || "Not available"}
+                    </div>
                   </td>
                   <td
-                    className="px-4 py-2 text-slate-500 max-w-xs truncate"
-                    title={p.cmdline ?? ""}
+                    className="mono"
+                    style={{
+                      color:
+                        (process.cpu_percent ?? 0) > 60
+                          ? "var(--amber)"
+                          : "inherit",
+                    }}
                   >
-                    {p.cmdline ? (
-                      <span className="text-slate-500">{p.cmdline}</span>
-                    ) : (
-                      <span className="text-slate-700">-</span>
-                    )}
+                    {process.cpu_percent?.toFixed(1) ?? "--"}%
                   </td>
-                  <td className="px-4 py-2">
-                    {p.cpu_percent !== null && p.cpu_percent !== undefined ? (
-                      <span
-                        className={
-                          p.cpu_percent > 80
-                            ? "text-rose-400"
-                            : p.cpu_percent > 40
-                              ? "text-amber-400"
-                              : "text-slate-300"
-                        }
-                      >
-                        {p.cpu_percent.toFixed(1)}%
-                      </span>
-                    ) : (
-                      <span className="text-slate-700">-</span>
-                    )}
+                  <td className="mono">
+                    {process.memory_percent?.toFixed(1) ?? "--"}%
                   </td>
-                  <td className="px-4 py-2">
-                    {p.memory_percent !== null &&
-                    p.memory_percent !== undefined ? (
-                      <span
-                        className={
-                          p.memory_percent > 50
-                            ? "text-amber-400"
-                            : "text-slate-300"
-                        }
-                      >
-                        {p.memory_percent.toFixed(1)}%
-                      </span>
-                    ) : (
-                      <span className="text-slate-700">-</span>
-                    )}
+                  <td className="mono">{process.nice ?? "--"}</td>
+                  <td className="mono">
+                    {process.cpu_affinity?.join(", ") ?? "--"}
                   </td>
-                  <td className="px-4 py-2">
-                    {p.nice !== null && p.nice !== undefined ? (
-                      <span
-                        className={
-                          p.nice < 0
-                            ? "text-cyan-400"
-                            : p.nice > 0
-                              ? "text-slate-500"
-                              : "text-slate-400"
-                        }
-                      >
-                        {p.nice > 0 ? `+${p.nice}` : p.nice}
-                      </span>
+                  <td>
+                    {process.arc_managed ? (
+                      <span className="badge green">Managed</span>
                     ) : (
-                      <span className="text-slate-700">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-[10px] text-slate-500">
-                    {p.cpu_affinity && p.cpu_affinity.length > 0 ? (
-                      `[${p.cpu_affinity.join(",")}]`
-                    ) : (
-                      <span className="text-slate-700">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {p.arc_managed ? (
-                      <span
-                        className="bg-cyan-950 border border-cyan-900 text-cyan-300 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wide"
-                        title={`Contracts: ${p.active_contract_ids.join(", ")}`}
-                      >
-                        Managed
-                      </span>
-                    ) : (
-                      <span className="text-slate-700 text-[10px]">-</span>
+                      <span className="panel-subtle">No</span>
                     )}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {filtered.length > 0 && (
-        <div className="text-[10px] text-slate-700 font-mono text-right">
-          Showing {filtered.length} of {processes.length} processes
-          {onlyManaged ? " (ARC-managed only)" : ""}
+              ))}
+              {!rows.length && (
+                <tr>
+                  <td colSpan={8}>
+                    <div className="empty">
+                      <div>
+                        <div className="empty-icon">
+                          <Cpu size={18} />
+                        </div>
+                        <strong>
+                          {loading
+                            ? "Loading processes"
+                            : "No matching processes"}
+                        </strong>
+                        <p>
+                          {query || managedOnly
+                            ? "Adjust the current filters."
+                            : "No process snapshot is available from the backend."}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
-    </div>
+        {selected && (
+          <aside className="panel inspector" aria-label="Process details">
+            <div className="panel-header">
+              <div className="panel-title">
+                <Cpu size={14} />
+                {selected.name || "Process"}
+              </div>
+              <button
+                className="button icon-button"
+                onClick={() => setSelected(null)}
+                aria-label="Close process details"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="panel-body">
+              <dl className="inspector-grid">
+                <dt>PID</dt>
+                <dd className="mono">{selected.pid}</dd>
+                <dt>CPU</dt>
+                <dd className="mono">
+                  {selected.cpu_percent?.toFixed(1) ?? "--"}%
+                </dd>
+                <dt>Memory</dt>
+                <dd className="mono">
+                  {selected.memory_percent?.toFixed(2) ?? "--"}%
+                </dd>
+                <dt>Nice</dt>
+                <dd className="mono">{selected.nice ?? "Unavailable"}</dd>
+                <dt>CPU affinity</dt>
+                <dd className="mono">
+                  {selected.cpu_affinity?.join(", ") ?? "Unavailable"}
+                </dd>
+                <dt>ARC state</dt>
+                <dd>
+                  {selected.arc_managed ? (
+                    <span className="badge green">Managed</span>
+                  ) : (
+                    "Not managed"
+                  )}
+                </dd>
+              </dl>
+              <div style={{ marginTop: 18 }}>
+                <div className="page-kicker">Command</div>
+                <div className="details">
+                  {selected.cmdline || "Command line unavailable"}
+                </div>
+              </div>
+              {selected.active_contract_ids.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div className="page-kicker">Associated contracts</div>
+                  {selected.active_contract_ids.map((id) => (
+                    <div className="list-primary mono" key={id}>
+                      {id}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p
+                className="panel-subtle"
+                style={{ marginTop: 18, lineHeight: 1.5 }}
+              >
+                This inspector is read-only. ARC applies resource changes only
+                through validated contracts.
+              </p>
+            </div>
+          </aside>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function Sortable({
+  label,
+  value,
+  current,
+  descending,
+  onClick,
+}: {
+  label: string;
+  value: SortKey;
+  current: SortKey;
+  descending: boolean;
+  onClick: (key: SortKey) => void;
+}) {
+  return (
+    <th>
+      <button
+        onClick={() => onClick(value)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          color: current === value ? "#d9dade" : "inherit",
+        }}
+      >
+        {label}
+        <ChevronDown
+          size={10}
+          style={{
+            transform:
+              current === value && !descending ? "rotate(180deg)" : "none",
+            opacity: current === value ? 1 : 0.35,
+          }}
+        />
+      </button>
+    </th>
   );
 }

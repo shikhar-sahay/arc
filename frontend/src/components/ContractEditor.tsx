@@ -149,12 +149,11 @@ restore:
 `;
 }
 
-const inputCls =
-  "w-full bg-slate-950 border border-slate-700 rounded p-2 text-slate-200 focus:border-cyan-500 focus:outline-none text-xs font-mono";
+const inputCls = "field font-mono";
 const labelCls =
-  "block text-slate-400 mb-1 text-[11px] uppercase tracking-wide";
+  "block text-neutral-400 mb-1.5 text-[10px] uppercase tracking-wider font-semibold";
 const sectionCls =
-  "border border-slate-800 p-3 rounded space-y-2 bg-slate-950/50";
+  "panel-body border border-neutral-800 rounded-lg space-y-3 bg-neutral-950/30";
 
 export function ContractEditor({
   mode,
@@ -321,12 +320,12 @@ export function ContractEditor({
 
   return (
     <div
-      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-10 overflow-y-auto"
+      className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div className="bg-slate-900 border border-slate-700 rounded-lg max-w-2xl w-full p-6 space-y-4 shadow-2xl mb-10">
+      <div className="bg-[#1b1d1f] border border-[#34373a] rounded-xl max-w-3xl w-full p-5 sm:p-6 space-y-4 shadow-2xl mb-10">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200 font-mono">
@@ -369,8 +368,9 @@ export function ContractEditor({
               </div>
             )}
 
+            <div className="page-kicker">1 · Identity</div>
             {/* ID + Name */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>ID (hyphen-case)</label>
                 <input
@@ -413,9 +413,9 @@ export function ContractEditor({
             {/* Target */}
             <div className={sectionCls}>
               <div className="font-bold text-slate-400 uppercase text-[10px] tracking-widest mb-1">
-                FOR (Target Process)
+                2 · Target process
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>Executable name</label>
                   <input
@@ -442,9 +442,9 @@ export function ContractEditor({
             {/* Trigger */}
             <div className={sectionCls}>
               <div className="font-bold text-slate-400 uppercase text-[10px] tracking-widest mb-1">
-                WHEN (Trigger Condition)
+                3 · Trigger condition
               </div>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 <div>
                   <label className={labelCls}>Metric</label>
                   <select
@@ -526,7 +526,7 @@ export function ContractEditor({
             <div className={sectionCls}>
               <div className="flex items-center justify-between mb-1">
                 <div className="font-bold text-slate-400 uppercase text-[10px] tracking-widest">
-                  DO (Actions)
+                  4 · Resource actions
                 </div>
                 {actionDrafts.length < 4 && (
                   <button
@@ -559,7 +559,7 @@ export function ContractEditor({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>Action type</label>
                       <select
@@ -668,9 +668,9 @@ export function ContractEditor({
             {/* Restore */}
             <div className={sectionCls}>
               <div className="font-bold text-slate-400 uppercase text-[10px] tracking-widest mb-1">
-                UNTIL (Restore Condition)
+                5 · Restoration condition
               </div>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 <div>
                   <label className={labelCls}>Metric</label>
                   <select
@@ -748,6 +748,28 @@ export function ContractEditor({
               </div>
             </div>
 
+            <div className={sectionCls}>
+              <div className="font-bold text-neutral-400 uppercase text-[10px] tracking-widest">
+                6 · Review
+              </div>
+              <div className="details text-[11px] leading-6">
+                WHEN {formTriggerMetric} {formTriggerOp} {formTriggerVal} FOR{" "}
+                {formTriggerSec}s{"\n"}
+                DO {actionDrafts
+                  .map((action) => action.type)
+                  .join(", ")} TO{" "}
+                {formExecutable || formCommand || "target process"}
+                {"\n"}
+                UNTIL {formRestoreMetric} {formRestoreOp} {formRestoreVal} FOR{" "}
+                {formRestoreSec}s{"\n"}
+                THEN RESTORE exact prior resource state
+              </div>
+              <p className="text-neutral-500 text-[10px] leading-relaxed">
+                The backend validates this contract before saving. Active
+                contracts cannot be changed until restoration completes.
+              </p>
+            </div>
+
             <div className="flex items-center justify-between pt-2">
               <button
                 type="button"
@@ -804,7 +826,7 @@ export function ContractEditor({
 function ContractStructuredView({ c }: { c: Contract }) {
   return (
     <div className="space-y-3 text-xs font-mono">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <div className="text-slate-500 uppercase text-[10px] mb-1">ID</div>
           <div className="text-slate-200">{c.id}</div>
@@ -824,7 +846,7 @@ function ContractStructuredView({ c }: { c: Contract }) {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-3 border-t border-slate-800 pt-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-neutral-800 pt-3">
         <div className="bg-slate-950 border border-slate-800 rounded p-3">
           <div className="text-[10px] text-slate-500 uppercase mb-2 tracking-widest">
             FOR

@@ -18,6 +18,7 @@ export interface SystemTelemetry {
   memory_percent: number;
   cpu_count: number;
   timestamp: number;
+  cpu_per_core_percent?: number[];
 }
 
 export interface TargetIdentity {
