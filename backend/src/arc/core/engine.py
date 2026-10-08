@@ -138,6 +138,11 @@ class ObservationEngine:
         return list(self._contracts)
 
     @property
+    def resource_adapter(self) -> ResourceAdapter:
+        """Resource adapter used for read-only process enrichment."""
+        return self._adapter
+
+    @property
     def capabilities(self) -> PlatformCapabilities:
         """Platform and privilege report."""
         return self._capabilities
@@ -180,19 +185,25 @@ class ObservationEngine:
         """
         with self._lock:
             new_contract_map = {c.id: c for c in new_contracts}
-            # Check if any active contract is being removed
+            old_contract_map = {c.id: c for c in self._contracts}
+            protected = (
+                LifecycleState.ACTIVE,
+                LifecycleState.ACTIVATING,
+                LifecycleState.RESTORING,
+            )
+            # Validate the entire replacement before mutating definitions or trackers.
             for old_id, runtime in self._runtimes.items():
-                if old_id not in new_contract_map:
-                    if runtime.lifecycle in (
-                        LifecycleState.ACTIVE,
-                        LifecycleState.ACTIVATING,
-                        LifecycleState.RESTORING,
-                    ):
-                        msg = (
-                            f"cannot remove contract {old_id} "
-                            f"while in state {runtime.lifecycle.value}"
-                        )
-                        raise ValueError(msg)
+                if runtime.lifecycle not in protected:
+                    continue
+                replacement = new_contract_map.get(old_id)
+                if replacement is None:
+                    raise ValueError(
+                        f"cannot remove contract {old_id} while in state {runtime.lifecycle.value}"
+                    )
+                if replacement != old_contract_map[old_id]:
+                    raise ValueError(
+                        f"cannot modify contract {old_id} while in state {runtime.lifecycle.value}"
+                    )
 
             updated_runtimes: dict[str, ContractRuntimeState] = {}
             for contract in new_contracts:
@@ -212,7 +223,12 @@ class ObservationEngine:
             self._runtimes = updated_runtimes
             logger.info("reloaded %d contract(s) into engine", len(self._contracts))
 
-    def enable_contract(self, contract_id: str, enabled: bool) -> Contract:
+    def enable_contract(
+        self,
+        contract_id: str,
+        enabled: bool,
+        persist: Callable[[Contract], None] | None = None,
+    ) -> Contract:
         """Toggle enabled flag for a contract definition."""
         with self._lock:
             idx = next((i for i, c in enumerate(self._contracts) if c.id == contract_id), None)
@@ -221,7 +237,19 @@ class ObservationEngine:
             current = self._contracts[idx]
             if current.enabled == enabled:
                 return current
+            runtime = self._runtimes[contract_id]
+            if runtime.lifecycle in (
+                LifecycleState.ACTIVATING,
+                LifecycleState.ACTIVE,
+                LifecycleState.RESTORING,
+            ):
+                raise ValueError(
+                    f"cannot change enabled state for contract {contract_id} while in state "
+                    f"{runtime.lifecycle.value}"
+                )
             updated = current.model_copy(update={"enabled": enabled})
+            if persist is not None:
+                persist(updated)
             self._contracts[idx] = updated
             return updated
 
@@ -305,6 +333,8 @@ class ObservationEngine:
             now = time.monotonic()
             for contract in self._contracts:
                 runtime = self._runtimes[contract.id]
+                # ACTIVATING and RESTORING are synchronous transitions performed
+                # while this same lock is held, so shutdown cannot observe them.
                 if runtime.lifecycle is not LifecycleState.ACTIVE:
                     continue
                 error = self._settle_snapshots(contract, runtime, reason="engine shutdown", now=now)
@@ -455,6 +485,7 @@ class ObservationEngine:
             ArcEventType.CONTRACT_ACTIVATING,
             f"contract {contract.id} activating for pids {[obs.pid for obs in matched]}",
             contract_id=contract.id,
+            details={"matched_pids": [obs.pid for obs in matched]},
         )
         try:
             result = activate_contract(
@@ -474,6 +505,13 @@ class ObservationEngine:
                     f"snapshot captured for pid {snapshot.identity.pid}",
                     contract_id=contract.id,
                     pid=snapshot.identity.pid,
+                    details={
+                        "create_time": snapshot.identity.create_time,
+                        "prior_nice": snapshot.nice,
+                        "prior_affinity": snapshot.affinity,
+                        "prior_stopped": snapshot.stopped,
+                        "prior_cpu_quota": snapshot.cpu_quota,
+                    },
                 )
             for op in result.applied:
                 self._events.record(
@@ -481,11 +519,21 @@ class ObservationEngine:
                     f"{op.kind}={op.requested} applied to pid {op.pid}",
                     contract_id=contract.id,
                     pid=op.pid,
+                    details={
+                        "action_index": op.action_index,
+                        "kind": op.kind,
+                        "previous": str(op.previous),
+                        "requested": op.requested,
+                    },
                 )
             self._events.record(
                 ArcEventType.CONTRACT_ACTIVATED,
                 f"contract {contract.id} active on {len(result.snapshots)} process(es)",
                 contract_id=contract.id,
+                details={
+                    "target_count": len(result.snapshots),
+                    "pids": [snapshot.identity.pid for snapshot in result.snapshots],
+                },
             )
             runtime.note_evaluated(EvaluationOutcome.ACTIVATED, now)
             return ContractEvaluation(
@@ -510,6 +558,7 @@ class ObservationEngine:
             f"contract {contract.id} activation failed: {error}",
             severity="error",
             contract_id=contract.id,
+            details={"error": error, "rollback_errors": rollback_errors},
         )
         if rollback_errors:
             self._events.record(

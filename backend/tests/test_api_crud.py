@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from arc.api.app import create_app
+from arc.contracts.repository import ContractPersistenceError
+from arc.core.lifecycle import LifecycleState
 from arc.linux.fake_adapter import FakeResourceAdapter
 from tests.conftest import make_fake, valid_contract_data
 
@@ -77,3 +79,39 @@ def test_enriched_processes_endpoint(api_client) -> None:
     data = resp.json()
     assert "processes" in data
     assert "total_observed" in data
+
+
+@pytest.mark.parametrize(
+    "state",
+    [LifecycleState.ACTIVATING, LifecycleState.ACTIVE, LifecycleState.RESTORING],
+)
+def test_toggle_rejects_protected_contract_with_conflict(api_client, state) -> None:
+    client, _contracts_dir, _fake = api_client
+    data = valid_contract_data(id="protected")
+    assert client.post("/api/contracts", json=data).status_code == 200
+    runtime = client.app.state.engine.runtime_for("protected")
+    assert runtime is not None
+    runtime.lifecycle = state
+
+    response = client.patch("/api/contracts/protected/enabled", json={"enabled": False})
+
+    assert response.status_code == 409
+    assert state.value in response.json()["detail"]
+    assert client.app.state.engine.contracts[0].enabled is True
+
+
+def test_toggle_persistence_failure_does_not_change_engine(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _contracts_dir, _fake = api_client
+    data = valid_contract_data(id="persistent")
+    assert client.post("/api/contracts", json=data).status_code == 200
+
+    def fail_save(*_args, **_kwargs) -> None:
+        raise ContractPersistenceError("disk write failed")
+
+    monkeypatch.setattr("arc.api.app.save_contract_file", fail_save)
+    response = client.patch("/api/contracts/persistent/enabled", json={"enabled": False})
+
+    assert response.status_code == 500
+    assert client.app.state.engine.contracts[0].enabled is True

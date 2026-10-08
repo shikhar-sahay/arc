@@ -7,6 +7,7 @@ own loop (started in lifespan), never inside a GET handler.
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -50,11 +51,12 @@ from arc.contracts.repository import (
     delete_contract_file,
     save_contract_file,
 )
-from arc.core.engine import ObservationEngine
+from arc.core.engine import ContractStatusView, ObservationEngine
 from arc.core.lifecycle import LifecycleState
 from arc.linux.resources import ResourceAdapter
 from arc.monitoring.processes import sample_processes
 from arc.monitoring.system import SystemMonitor
+from arc.observability.events import ArcEvent
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,66 @@ class ConnectionManager:
                 stale.append(connection)
         for dead in stale:
             self.disconnect(dead)
+
+
+def _contract_status_response(view: ContractStatusView) -> ContractStatus:
+    """Use one response shape for contract list and mutation endpoints."""
+    return ContractStatus(
+        contract=view.contract,
+        lifecycle=view.lifecycle,
+        outcome=view.outcome,
+        matched_pids=view.matched_pids,
+        active_targets=[
+            TargetIdentityResponse(
+                pid=identity.pid,
+                create_time=identity.create_time,
+                name=identity.name,
+            )
+            for identity in view.active_identities
+        ],
+        trigger_raw=view.trigger_raw,
+        trigger_satisfied=view.trigger_satisfied,
+        restore_raw=view.restore_raw,
+        restore_satisfied=view.restore_satisfied,
+        activated_at=view.activated_at,
+        last_error=view.last_error,
+        trigger_elapsed_seconds=view.trigger_elapsed_seconds,
+        restore_elapsed_seconds=view.restore_elapsed_seconds,
+    )
+
+
+def _event_payload(event: ArcEvent) -> dict[str, object]:
+    """Serialize the complete event shape used by REST and WebSocket clients."""
+    return EventResponse.from_event(event).model_dump(mode="json")
+
+
+def websocket_state_payload(engine: ObservationEngine, message_type: str) -> dict[str, object]:
+    """Build a complete observation-only WebSocket state message."""
+    status = engine.engine_status()
+    telemetry = engine.latest_telemetry()
+    return {
+        "type": message_type,
+        "status": {
+            "running": status.running,
+            "contract_count": status.contract_count,
+            "active_contracts": status.active_contracts,
+            "error_contracts": status.error_contracts,
+            "enforcement_supported": status.enforcement_supported,
+            "cgroup_available": status.cgroup_available,
+            "cgroup_reason": status.cgroup_reason,
+        },
+        "telemetry": (
+            {
+                "cpu_percent": telemetry.cpu_percent,
+                "memory_percent": telemetry.memory_percent,
+                "cpu_count": telemetry.cpu_count,
+                "timestamp": telemetry.timestamp,
+            }
+            if telemetry
+            else None
+        ),
+        "recent_events": [_event_payload(ev) for ev in engine.recent_events(5)],
+    }
 
 
 def load_contracts_lenient(directory: Path) -> tuple[list[Contract], list[ContractLoadIssue]]:
@@ -165,42 +227,7 @@ def create_app(
                 await asyncio.sleep(2.0)
                 if ws_manager.active_connections:
                     try:
-                        status = engine.engine_status()
-                        telemetry = engine.latest_telemetry()
-                        recent_evs = engine.recent_events(5)
-                        msg = {
-                            "type": "tick",
-                            "status": {
-                                "running": status.running,
-                                "contract_count": status.contract_count,
-                                "active_contracts": status.active_contracts,
-                                "error_contracts": status.error_contracts,
-                                "enforcement_supported": status.enforcement_supported,
-                                "cgroup_available": status.cgroup_available,
-                                "cgroup_reason": status.cgroup_reason,
-                            },
-                            "telemetry": (
-                                {
-                                    "cpu_percent": telemetry.cpu_percent,
-                                    "memory_percent": telemetry.memory_percent,
-                                    "cpu_count": telemetry.cpu_count,
-                                    "timestamp": telemetry.timestamp,
-                                }
-                                if telemetry
-                                else None
-                            ),
-                            "recent_events": [
-                                {
-                                    "seq": ev.seq,
-                                    "timestamp": ev.timestamp,
-                                    "type": ev.type.value,
-                                    "severity": ev.severity,
-                                    "message": ev.message,
-                                    "contract_id": ev.contract_id,
-                                }
-                                for ev in recent_evs
-                            ],
-                        }
+                        msg = websocket_state_payload(engine, "tick")
                         await ws_manager.broadcast(msg)
                     except Exception as e:
                         logger.debug("WS broadcast error: %s", e)
@@ -232,12 +259,18 @@ def create_app(
         lifespan=lifespan,
     )
 
+    cors_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    cors_origins.extend(
+        origin.strip()
+        for origin in os.environ.get("ARC_CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -295,31 +328,7 @@ def create_app(
     def get_contracts() -> ContractListResponse:
         """Contract runtime state from the engine. Never enforces."""
         engine: ObservationEngine = app.state.engine
-        statuses = [
-            ContractStatus(
-                contract=view.contract,
-                lifecycle=view.lifecycle,
-                outcome=view.outcome,
-                matched_pids=view.matched_pids,
-                active_targets=[
-                    TargetIdentityResponse(
-                        pid=identity.pid,
-                        create_time=identity.create_time,
-                        name=identity.name,
-                    )
-                    for identity in view.active_identities
-                ],
-                trigger_raw=view.trigger_raw,
-                trigger_satisfied=view.trigger_satisfied,
-                restore_raw=view.restore_raw,
-                restore_satisfied=view.restore_satisfied,
-                activated_at=view.activated_at,
-                last_error=view.last_error,
-                trigger_elapsed_seconds=view.trigger_elapsed_seconds,
-                restore_elapsed_seconds=view.restore_elapsed_seconds,
-            )
-            for view in engine.contract_statuses()
-        ]
+        statuses = [_contract_status_response(view) for view in engine.contract_statuses()]
         return ContractListResponse(
             contracts=statuses,
             count=len(statuses),
@@ -354,15 +363,7 @@ def create_app(
         engine.set_contract(contract)
         views = {v.contract.id: v for v in engine.contract_statuses()}
         view = views[contract.id]
-        return ContractStatus(
-            contract=view.contract,
-            lifecycle=view.lifecycle,
-            outcome=view.outcome,
-            matched_pids=view.matched_pids,
-            last_error=view.last_error,
-            trigger_elapsed_seconds=view.trigger_elapsed_seconds,
-            restore_elapsed_seconds=view.restore_elapsed_seconds,
-        )
+        return _contract_status_response(view)
 
     @app.put("/api/contracts/{contract_id}", response_model=ContractStatus)
     def update_contract(
@@ -401,15 +402,7 @@ def create_app(
 
         views = {v.contract.id: v for v in engine.contract_statuses()}
         view = views[contract.id]
-        return ContractStatus(
-            contract=view.contract,
-            lifecycle=view.lifecycle,
-            outcome=view.outcome,
-            matched_pids=view.matched_pids,
-            last_error=view.last_error,
-            trigger_elapsed_seconds=view.trigger_elapsed_seconds,
-            restore_elapsed_seconds=view.restore_elapsed_seconds,
-        )
+        return _contract_status_response(view)
 
     @app.delete("/api/contracts/{contract_id}")
     def delete_contract(
@@ -451,27 +444,21 @@ def create_app(
         engine: ObservationEngine = app.state.engine
 
         try:
-            updated_contract = engine.enable_contract(contract_id, payload.enabled)
+            engine.enable_contract(
+                contract_id,
+                payload.enabled,
+                persist=lambda contract: save_contract_file(directory, contract),
+            )
         except KeyError:
             raise HTTPException(status_code=404, detail=f"contract {contract_id} not found")
-
-        # Persist updated enabled state to disk
-        try:
-            save_contract_file(directory, updated_contract)
         except ContractPersistenceError as exc:
-            logger.warning("could not persist enabled state to disk: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         views = {v.contract.id: v for v in engine.contract_statuses()}
         view = views[contract_id]
-        return ContractStatus(
-            contract=view.contract,
-            lifecycle=view.lifecycle,
-            outcome=view.outcome,
-            matched_pids=view.matched_pids,
-            last_error=view.last_error,
-            trigger_elapsed_seconds=view.trigger_elapsed_seconds,
-            restore_elapsed_seconds=view.restore_elapsed_seconds,
-        )
+        return _contract_status_response(view)
 
     @app.post("/api/contracts/{contract_id}/reset")
     def reset_contract_error(
@@ -520,7 +507,7 @@ def create_app(
                 ) from exc
         page = observations[:limit]
         managed_map = app.state.engine.managed_pids_by_contract()
-        adapter: ResourceAdapter = app.state.engine._adapter
+        adapter: ResourceAdapter = app.state.engine.resource_adapter
 
         results: list[ProcessResponse] = []
         for obs in page:
@@ -575,44 +562,7 @@ def create_app(
         try:
             # Send initial state snapshot immediately
             engine: ObservationEngine = app.state.engine
-            status = engine.engine_status()
-            telemetry = engine.latest_telemetry()
-            recent_evs = engine.recent_events(5)
-            await websocket.send_json(
-                {
-                    "type": "init",
-                    "status": {
-                        "running": status.running,
-                        "contract_count": status.contract_count,
-                        "active_contracts": status.active_contracts,
-                        "error_contracts": status.error_contracts,
-                        "enforcement_supported": status.enforcement_supported,
-                        "cgroup_available": status.cgroup_available,
-                        "cgroup_reason": status.cgroup_reason,
-                    },
-                    "telemetry": (
-                        {
-                            "cpu_percent": telemetry.cpu_percent,
-                            "memory_percent": telemetry.memory_percent,
-                            "cpu_count": telemetry.cpu_count,
-                            "timestamp": telemetry.timestamp,
-                        }
-                        if telemetry
-                        else None
-                    ),
-                    "recent_events": [
-                        {
-                            "seq": ev.seq,
-                            "timestamp": ev.timestamp,
-                            "type": ev.type.value,
-                            "severity": ev.severity,
-                            "message": ev.message,
-                            "contract_id": ev.contract_id,
-                        }
-                        for ev in recent_evs
-                    ],
-                }
-            )
+            await websocket.send_json(websocket_state_payload(engine, "init"))
             while True:
                 # Keep alive / read incoming pings
                 await websocket.receive_text()

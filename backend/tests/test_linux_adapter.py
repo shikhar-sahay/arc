@@ -74,6 +74,69 @@ def test_gone_process_maps_to_not_found(monkeypatch: pytest.MonkeyPatch) -> None
         LinuxResourceAdapter().get_identity(1234)
 
 
+def test_signal_safety_protects_parent_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ARC never sends stop or continue signals to its untracked parent chain."""
+
+    class Process:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def parents(self):
+            return [Process(50)] if self.pid == 100 else []
+
+        def create_time(self) -> float:
+            return 1.0
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("arc.linux.psutil_adapter.os.getpid", lambda: 100)
+    monkeypatch.setattr(psutil, "Process", Process)
+    adapter = LinuxResourceAdapter()
+
+    with pytest.raises(ResourceControlError, match="parent chain"):
+        adapter.suspend_process(50)
+    with pytest.raises(ResourceControlError, match="parent chain"):
+        adapter.resume_process(50)
+
+
+def test_tracked_suspend_can_be_restored_if_target_becomes_protected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identity-pinned ARC suspensions remain resumable during restoration."""
+    target_is_parent = False
+
+    class Process:
+        stopped = False
+
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def parents(self):
+            return [Process(200)] if self.pid == 100 and target_is_parent else []
+
+        def create_time(self) -> float:
+            return 2.0 if self.pid == 200 else 1.0
+
+        def suspend(self) -> None:
+            Process.stopped = True
+
+        def resume(self) -> None:
+            Process.stopped = False
+
+        def status(self) -> str:
+            return psutil.STATUS_STOPPED if Process.stopped else psutil.STATUS_RUNNING
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("arc.linux.psutil_adapter.os.getpid", lambda: 100)
+    monkeypatch.setattr(psutil, "Process", Process)
+    adapter = LinuxResourceAdapter()
+
+    adapter.suspend_process(200)
+    target_is_parent = True
+    adapter.resume_process(200)
+
+    assert Process.stopped is False
+
+
 def test_fake_identity_roundtrip() -> None:
     """Fake identities carry PID plus creation time."""
     fake = make_fake(pid=50, create_time=1000.0, name="python")

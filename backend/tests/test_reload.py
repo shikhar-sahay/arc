@@ -36,6 +36,58 @@ def test_reload_protects_active_contract() -> None:
         engine.reload_contracts([])
 
 
+@pytest.mark.parametrize(
+    "state",
+    [LifecycleState.ACTIVATING, LifecycleState.ACTIVE, LifecycleState.RESTORING],
+)
+def test_reload_rejects_changed_protected_contract_atomically(state) -> None:
+    trigger = {
+        "metric": "system.cpu.percent",
+        "operator": "gt",
+        "value": 75,
+        "for_seconds": 7,
+    }
+    original = make_contract(id="c1", name="Original", trigger=trigger)
+    engine, _ = make_engine(contracts=[original])
+    runtime = engine.runtime_for("c1")
+    assert runtime is not None
+    runtime.lifecycle = state
+
+    changed = make_contract(id="c1", name="Changed", trigger={**trigger, "for_seconds": 99})
+    with pytest.raises(ValueError, match="cannot modify contract c1"):
+        engine.reload_contracts([changed])
+
+    assert engine.contracts == [original]
+    assert runtime.trigger_tracker.required_seconds == 7
+
+
+@pytest.mark.parametrize(
+    "state",
+    [LifecycleState.ACTIVATING, LifecycleState.ACTIVE, LifecycleState.RESTORING],
+)
+def test_reload_accepts_unchanged_protected_contract(state) -> None:
+    original = make_contract(id="c1")
+    engine, _ = make_engine(contracts=[original])
+    runtime = engine.runtime_for("c1")
+    assert runtime is not None
+    runtime.lifecycle = state
+
+    engine.reload_contracts([original.model_copy(deep=True)])
+
+    assert engine.contracts == [original]
+    assert engine.runtime_for("c1") is runtime
+
+
+def test_reload_allows_inactive_definition_update() -> None:
+    original = make_contract(id="c1", name="Original")
+    changed = make_contract(id="c1", name="Changed")
+    engine, _ = make_engine(contracts=[original])
+
+    engine.reload_contracts([changed])
+
+    assert engine.contracts == [changed]
+
+
 def test_set_contract_protects_active_contract() -> None:
     c1 = make_contract(id="c1")
     engine, _ = make_engine(contracts=[c1])
@@ -59,4 +111,34 @@ def test_enable_contract_toggle() -> None:
 
     updated2 = engine.enable_contract("c1", True)
     assert updated2.enabled is True
+    assert engine.contracts[0].enabled is True
+
+
+@pytest.mark.parametrize(
+    "state",
+    [LifecycleState.ACTIVATING, LifecycleState.ACTIVE, LifecycleState.RESTORING],
+)
+def test_enable_contract_rejects_protected_states(state) -> None:
+    c1 = make_contract(id="c1", enabled=True)
+    engine, _ = make_engine(contracts=[c1])
+    runtime = engine.runtime_for("c1")
+    assert runtime is not None
+    runtime.lifecycle = state
+
+    with pytest.raises(ValueError, match="cannot change enabled state"):
+        engine.enable_contract("c1", False)
+
+    assert engine.contracts[0].enabled is True
+
+
+def test_enable_contract_persistence_failure_is_atomic() -> None:
+    c1 = make_contract(id="c1", enabled=True)
+    engine, _ = make_engine(contracts=[c1])
+
+    def fail(_contract) -> None:
+        raise RuntimeError("disk full")
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        engine.enable_contract("c1", False, persist=fail)
+
     assert engine.contracts[0].enabled is True

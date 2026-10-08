@@ -53,6 +53,22 @@ def _process(operation: str, pid: int) -> psutil.Process:
 class LinuxResourceAdapter:
     """Real adapter. Safe to construct anywhere; use refuses off Linux."""
 
+    def __init__(self) -> None:
+        self._suspended_by_arc: set[tuple[int, float]] = set()
+
+    @staticmethod
+    def _protected_pids() -> set[int]:
+        """Return init, ARC, and ARC's current ancestor chain."""
+        protected = {1, os.getpid()}
+        try:
+            current = psutil.Process(os.getpid())
+            protected.update(parent.pid for parent in current.parents())
+        except (psutil.Error, OSError):
+            parent = os.getppid()
+            if parent > 0:
+                protected.add(parent)
+        return protected
+
     @property
     def enforcement_supported(self) -> bool:
         """True only on Linux."""
@@ -136,12 +152,13 @@ class LinuxResourceAdapter:
     def suspend_process(self, pid: int) -> None:
         """Stop the process with SIGSTOP and verify it stopped."""
         operation = "suspend_process"
-        if pid == os.getpid():
+        if pid in self._protected_pids():
             raise ResourceControlError(
-                operation, pid, "refusing to suspend ARC's own runtime process"
+                operation, pid, "refusing to suspend ARC, its parent chain, or init"
             )
         proc = _process(operation, pid)
         try:
+            identity = (pid, float(proc.create_time()))
             proc.suspend()
         except psutil.NoSuchProcess as exc:
             raise ProcessNotFoundError(operation, pid, "process exited before suspend") from exc
@@ -152,12 +169,20 @@ class LinuxResourceAdapter:
                 "kernel refused suspend (ownership or capability missing)",
             ) from exc
         self._await_state(proc, pid, operation, stopped=True)
+        self._suspended_by_arc.add(identity)
 
     def resume_process(self, pid: int) -> None:
         """Continue the process with SIGCONT and verify it resumed."""
         operation = "resume_process"
         proc = _process(operation, pid)
         try:
+            identity = (pid, float(proc.create_time()))
+            if pid in self._protected_pids() and identity not in self._suspended_by_arc:
+                raise ResourceControlError(
+                    operation,
+                    pid,
+                    "refusing to resume ARC, its parent chain, or init",
+                )
             proc.resume()
         except psutil.NoSuchProcess as exc:
             raise ProcessNotFoundError(operation, pid, "process exited before resume") from exc
@@ -168,6 +193,7 @@ class LinuxResourceAdapter:
                 "kernel refused resume (ownership or capability missing)",
             ) from exc
         self._await_state(proc, pid, operation, stopped=False)
+        self._suspended_by_arc.discard(identity)
 
     @staticmethod
     def _await_state(proc: psutil.Process, pid: int, operation: str, stopped: bool) -> None:
