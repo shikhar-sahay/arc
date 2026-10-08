@@ -24,7 +24,7 @@ def run(role: str, mode_path: Path, stats_path: Path) -> None:
     value = 1
     window_started = time.monotonic()
     while (mode := _mode(mode_path)) != "stop":
-        active = role == "foreground" or mode == "high"
+        active = role == "foreground" or (role == "background" and mode == "high")
         if active:
             for _ in range(25_000):
                 value = (value * 1_664_525 + 1_013_904_223) & 0xFFFFFFFF
@@ -51,7 +51,11 @@ def run(role: str, mode_path: Path, stats_path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--role", choices=("foreground", "background"), required=True)
+    parser.add_argument(
+        "--role",
+        choices=("foreground", "background", "suspension-target"),
+        required=True,
+    )
     parser.add_argument("--mode-file", type=Path, required=True)
     parser.add_argument("--stats-file", type=Path, required=True)
     parser.add_argument("--token", required=True)

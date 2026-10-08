@@ -23,7 +23,13 @@ export function MiniSparkline({
 }: MiniSparklineProps) {
   if (data.length < 2) {
     return (
-      <svg width={width} height={height} className={className}>
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        className={className}
+      >
         <line
           x1="0"
           y1={height / 2}
@@ -54,6 +60,8 @@ export function MiniSparkline({
     <svg
       width={width}
       height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
       className={className}
       role="img"
       aria-label="Metric history sparkline"

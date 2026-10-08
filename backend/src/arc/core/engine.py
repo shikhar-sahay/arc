@@ -644,10 +644,7 @@ class ObservationEngine:
         conflicts: list[str] = []
         contract_by_id = {contract.id: contract for contract in self._contracts}
         for owner_id, owner_runtime in self._runtimes.items():
-            if owner_id == candidate.id or owner_runtime.lifecycle not in (
-                LifecycleState.ACTIVE,
-                LifecycleState.RESTORING,
-            ):
+            if owner_id == candidate.id or not owner_runtime.snapshots:
                 continue
             owner = contract_by_id.get(owner_id)
             if owner is None:

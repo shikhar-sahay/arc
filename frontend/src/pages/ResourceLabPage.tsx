@@ -57,10 +57,9 @@ export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
   };
   const running = state?.state !== "stopped";
   const contract = state?.contract;
-  const foreground =
-    state?.workloads.filter((item) => item.role === "foreground") ?? [];
   const background =
     state?.workloads.filter((item) => item.role === "background") ?? [];
+  const workloads = state?.workloads ?? [];
   const allocationChanged = useMemo(
     () =>
       background.some(
@@ -190,14 +189,14 @@ export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
           <div className="lab-chart-row">
             <div>
               <span>System CPU, 0 to 100%</span>
-              <MiniSparkline data={cpuHistory} max={100} color="var(--cpu)" />
+              <MiniSparkline data={cpuHistory} max={100} color="var(--blue)" />
             </div>
             <div>
               <span>Foreground</span>
               <MiniSparkline
                 data={foregroundHistory}
                 max={Math.max(...foregroundHistory, 1)}
-                color="var(--cpu)"
+                color="var(--blue)"
               />
             </div>
             <div>
@@ -205,7 +204,7 @@ export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
               <MiniSparkline
                 data={backgroundHistory}
                 max={Math.max(...backgroundHistory, 1)}
-                color="var(--memory)"
+                color="var(--purple)"
               />
             </div>
           </div>
@@ -273,7 +272,7 @@ export function ResourceLabPage({ telemetry, cpuHistory }: Props) {
               </tr>
             </thead>
             <tbody>
-              {[...foreground, ...background].map((item) => (
+              {workloads.map((item) => (
                 <tr key={item.pid}>
                   <td>{item.role}</td>
                   <td className="mono">{item.pid}</td>

@@ -1,5 +1,10 @@
 """Tests for cgroups v2 integration and FakeCgroupManager."""
 
+import sys
+from pathlib import Path
+
+import pytest
+
 from arc.enforcement.service import activate_contract
 from arc.linux.cgroups import FakeCgroupManager, LinuxCgroupManager
 from arc.linux.fake_adapter import FakeProcess, FakeResourceAdapter
@@ -33,6 +38,51 @@ def test_linux_cgroup_capabilities_honest() -> None:
     # On Windows or non-cgroup systems, available is False with honest reason
     assert isinstance(caps.available, bool)
     assert isinstance(caps.reason, str)
+
+
+def test_cgroup_detection_does_not_claim_read_only_hierarchy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "cgroup.controllers").write_text("cpu memory", encoding="utf-8")
+    (tmp_path / "cgroup.subtree_control").write_text("cpu", encoding="utf-8")
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("arc.linux.cgroups.os.access", lambda *_: False)
+
+    caps = LinuxCgroupManager(root=tmp_path).capabilities()
+
+    assert caps.available is False
+    assert caps.writable_hint is False
+    assert "no writable delegation" in caps.reason
+
+
+def test_cgroup_detection_reports_writable_cpu_delegation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "cgroup.controllers").write_text("cpu memory", encoding="utf-8")
+    (tmp_path / "cgroup.subtree_control").write_text("cpu", encoding="utf-8")
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("arc.linux.cgroups.os.access", lambda *_: True)
+
+    caps = LinuxCgroupManager(root=tmp_path).capabilities()
+
+    assert caps.available is True
+    assert caps.writable_hint is True
+    assert "writable" in caps.reason
+
+
+def test_cgroup_detection_requires_cpu_in_subtree_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "cgroup.controllers").write_text("cpu memory", encoding="utf-8")
+    (tmp_path / "cgroup.subtree_control").write_text("memory", encoding="utf-8")
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("arc.linux.cgroups.os.access", lambda *_: True)
+
+    caps = LinuxCgroupManager(root=tmp_path).capabilities()
+
+    assert caps.available is False
+    assert caps.writable_hint is True
+    assert "not enabled for child cgroups" in caps.reason
 
 
 def test_snapshot_failure_cleans_up_earlier_cgroup_leases() -> None:

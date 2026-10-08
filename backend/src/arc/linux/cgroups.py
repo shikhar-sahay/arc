@@ -7,10 +7,10 @@ Restoration writes the recorded value back, moves the process to its
 original cgroup, and removes the leaf. Nothing else is managed: no
 memory limits, no IO controls, no full cgroup manager.
 
-Availability is detected honestly without mutating anything: v2 is
-present only when ``cgroup.controllers`` is readable and lists the cpu
-controller. Write permission bits are a hint, not a promise; the kernel
-still decides at use time and denials surface as explicit errors. cgroup
+Availability is detected honestly without mutating anything: v2 must expose
+the cpu controller, enable it in ``cgroup.subtree_control``, and provide a
+writable delegated root. These checks are still a hint, not a promise; the
+kernel decides at use time and denials surface as explicit errors. Cgroup
 problems never block ARC startup or non-cgroup contracts.
 """
 
@@ -38,6 +38,7 @@ SCOPE_NAME = "arc"
 CPU_PERIOD = 100000
 CGROUP_PROCS = "cgroup.procs"
 CPU_MAX = "cpu.max"
+SUBTREE_CONTROL = "cgroup.subtree_control"
 DEFAULT_ROOT = Path("/sys/fs/cgroup")
 
 
@@ -169,12 +170,42 @@ class LinuxCgroupManager:
                 writable_hint=None,
                 reason="cgroups v2 present but the cpu controller is not enabled",
             )
+        subtree_file = self._root / SUBTREE_CONTROL
+        try:
+            enabled = tuple(sorted(subtree_file.read_text(encoding="utf-8").split()))
+        except OSError as exc:
+            return CgroupCapabilities(
+                available=False,
+                version="v2",
+                controllers=controllers,
+                writable_hint=None,
+                reason=f"cgroup.subtree_control unreadable: {exc}",
+            )
+        if "cpu" not in enabled:
+            return CgroupCapabilities(
+                available=False,
+                version="v2",
+                controllers=controllers,
+                writable_hint=os.access(self._root, os.W_OK),
+                reason="cgroups v2 CPU controller is present but not enabled for child cgroups",
+            )
+        writable = os.access(self._root, os.W_OK)
+        if not writable:
+            return CgroupCapabilities(
+                available=False,
+                version="v2",
+                controllers=controllers,
+                writable_hint=False,
+                reason=(
+                    "cgroups v2 CPU controller detected, but no writable delegation is available"
+                ),
+            )
         return CgroupCapabilities(
             available=True,
             version="v2",
             controllers=controllers,
-            writable_hint=os.access(self._root, os.W_OK),
-            reason="cgroups v2 with cpu controller detected",
+            writable_hint=True,
+            reason="writable cgroups v2 CPU controller detected; each operation is still verified",
         )
 
     def _require_available(self, operation: str, pid: int | None) -> None:

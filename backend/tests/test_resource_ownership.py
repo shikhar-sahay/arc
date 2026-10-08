@@ -90,3 +90,33 @@ def test_suspend_and_resume_share_process_state_ownership() -> None:
     assert result.evaluations[0].outcome is EvaluationOutcome.ACTIVATED
     assert result.evaluations[1].outcome is EvaluationOutcome.RESOURCE_CONFLICT
     assert adapter.is_stopped(50) is True
+
+
+def test_failed_restoration_retains_ownership_until_recovery() -> None:
+    first = _contract("first-nice", {"type": "nice", "value": 5})
+    second = _contract(
+        "second-nice",
+        {"type": "nice", "value": 10},
+        trigger_metric="system.memory.percent",
+    )
+    engine, adapter = make_engine([first, second])
+    observations = [make_observation()]
+    engine.step(make_telemetry(cpu=80, memory=10), observations, now=0)
+    adapter.deny_on("set_nice", 50)
+
+    failed = engine.step(make_telemetry(cpu=10, memory=80), observations, now=1)
+
+    assert failed.evaluations[0].outcome is EvaluationOutcome.RESTORATION_ERROR
+    assert failed.evaluations[1].outcome is EvaluationOutcome.RESOURCE_CONFLICT
+    assert engine.runtime_for("first-nice").lifecycle is LifecycleState.ERROR
+    assert engine.runtime_for("first-nice").snapshots
+    assert adapter.set_calls_for("set_nice", 50) == [5]
+
+    adapter.deny_sets.clear()
+    assert engine.reset_contract("first-nice") is True
+    assert engine.runtime_for("first-nice").snapshots == []
+    assert adapter.get_nice(50) == 0
+
+    retried = engine.step(make_telemetry(cpu=10, memory=80), observations, now=2)
+    assert retried.evaluations[1].outcome is EvaluationOutcome.ACTIVATED
+    assert adapter.get_nice(50) == 10

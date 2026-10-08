@@ -5,6 +5,7 @@ import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 from fastapi.testclient import TestClient
 
@@ -37,6 +38,20 @@ def _average_rates(client: TestClient, seconds: float = 2.0) -> tuple[float, flo
         background.append(sample["background_operations_per_second"])
         time.sleep(0.25)
     return sum(foreground) / len(foreground), sum(background) / len(background)
+
+
+def _wait_for_contract(
+    client: TestClient, contract_id: str, lifecycle: str, timeout: float = 20.0
+) -> dict:
+    deadline = time.monotonic() + timeout
+    last: dict = {}
+    while time.monotonic() < deadline:
+        contracts = client.get("/api/contracts").json()["contracts"]
+        last = next(item for item in contracts if item["contract"]["id"] == contract_id)
+        if last["lifecycle"] == lifecycle:
+            return last
+        time.sleep(0.5)
+    pytest.fail(f"{contract_id} did not reach {lifecycle}: {last}")
 
 
 def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) -> None:
@@ -82,4 +97,57 @@ def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) 
             f"enforced={enforced}, recovery={recovery}"
         )
 
+        assert client.post("/api/resource-lab/stop").status_code == 200
+
+
+def test_separate_suspension_target_does_not_remove_pressure(tmp_path: Path) -> None:
+    """Pressure workers keep running while ARC stops and restores a separate target."""
+    contract_id = "resource-lab-suspension-e2e"
+    contract = {
+        "version": 1,
+        "id": contract_id,
+        "name": "Resource Lab Suspension E2E",
+        "description": "Stop only the lab-owned idle verification target.",
+        "enabled": True,
+        "target": {
+            "type": "process",
+            "match": {
+                "executable": "python",
+                "command_contains": "arc-resource-lab-suspension-target",
+            },
+        },
+        "trigger": {
+            "metric": "system.cpu.percent",
+            "operator": "gt",
+            "value": 20,
+            "for_seconds": 1,
+        },
+        "actions": [{"type": "suspend"}],
+        "restore": {
+            "metric": "system.cpu.percent",
+            "operator": "lt",
+            "value": 10,
+            "for_seconds": 1,
+        },
+    }
+    with TestClient(
+        create_app(contracts_dir=tmp_path, auto_start=True, poll_interval_seconds=0.5)
+    ) as client:
+        started = client.post("/api/resource-lab/start", json={"workers": 10})
+        assert started.status_code == 200
+        target = next(
+            item for item in started.json()["workloads"] if item["role"] == "suspension-target"
+        )
+        assert client.post("/api/contracts", json=contract).status_code == 200
+
+        assert client.post("/api/resource-lab/pressure", json={"high": True}).status_code == 200
+        _wait_for_contract(client, contract_id, "active")
+        active = client.get("/api/resource-lab").json()
+        assert active["background_operations_per_second"] > 0
+        assert psutil.Process(target["pid"]).status() == psutil.STATUS_STOPPED
+        assert client.post("/api/resource-lab/stop").status_code == 409
+
+        assert client.post("/api/resource-lab/pressure", json={"high": False}).status_code == 200
+        _wait_for_contract(client, contract_id, "inactive")
+        assert psutil.Process(target["pid"]).status() != psutil.STATUS_STOPPED
         assert client.post("/api/resource-lab/stop").status_code == 200

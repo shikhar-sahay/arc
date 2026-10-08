@@ -6,7 +6,7 @@ enabled: false
 target:
   type: process
   match:
-    command_contains: arc-resource-lab-background
+    command_contains: arc-resource-lab-suspension-target
 trigger:
   metric: system.cpu.percent
   operator: gt

@@ -31,8 +31,9 @@ def test_resource_lab_scenario_owns_and_cleans_up_workers(tmp_path: Path) -> Non
         assert payload["worker_count"] == 2
         assert payload["contract"]["contract"]["id"] == "resource-lab-cpu-contention"
         pids = [item["pid"] for item in payload["workloads"]]
-        assert len(pids) == 3
+        assert len(pids) == 4
         assert all("arc-resource-lab" in " ".join(psutil.Process(pid).cmdline()) for pid in pids)
+        assert [item["role"] for item in payload["workloads"]].count("suspension-target") == 1
 
         assert client.post("/api/resource-lab/start", json={"workers": 1}).status_code == 409
         assert client.post("/api/resource-lab/pressure", json={"high": True}).status_code == 200

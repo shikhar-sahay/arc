@@ -49,6 +49,7 @@ class ResourceLabController:
             try:
                 self._write_mode("low")
                 self._spawn("foreground", 0)
+                self._spawn("suspension-target", 0)
                 for index in range(workers):
                     self._spawn("background", index)
                 self._mode = "baseline"
@@ -109,7 +110,7 @@ class ResourceLabController:
                 rate = float(stats.get("operations_per_second", 0.0))
                 if role == "foreground":
                     foreground_rate += rate
-                else:
+                elif role == "background":
                     background_rate += rate
                 proc = psutil.Process(pid)
                 cpu_times = proc.cpu_times()

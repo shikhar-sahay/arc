@@ -687,6 +687,14 @@ def create_app(
     @app.post("/api/resource-lab/stop")
     def stop_resource_lab() -> dict[str, object]:
         """Stop lab-owned workers only after ARC has released their resources."""
+        lab_pids = {item["pid"] for item in app.state.resource_lab.status().get("workloads", [])}
+        managed = app.state.engine.managed_pids_by_contract()
+        owned = sorted(lab_pids & set(managed))
+        if owned:
+            raise HTTPException(
+                status_code=409,
+                detail=f"restore active Resource Lab targets before stopping: {owned}",
+            )
         runtime = app.state.engine.runtime_for(LAB_CONTRACT_ID)
         if runtime is not None and (
             runtime.lifecycle is not LifecycleState.INACTIVE or runtime.snapshots

@@ -30,7 +30,7 @@ export interface TargetIdentity {
 
 export interface ResourceLabWorkload {
   pid: number;
-  role: "foreground" | "background";
+  role: "foreground" | "background" | "suspension-target";
   cpu_percent: number;
   affinity: number[];
   original_affinity: number[];
