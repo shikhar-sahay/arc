@@ -16,6 +16,8 @@ def test_system_snapshot_is_structurally_valid() -> None:
     assert 0.0 <= snapshot.cpu_percent <= 100.0
     assert 0.0 <= snapshot.memory_percent <= 100.0
     assert snapshot.cpu_count >= 1
+    assert len(snapshot.cpu_per_core_percent) == snapshot.cpu_count
+    assert all(0.0 <= value <= 100.0 for value in snapshot.cpu_per_core_percent)
     assert snapshot.timestamp > 0
 
 

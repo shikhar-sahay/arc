@@ -36,6 +36,8 @@ def test_system_endpoint_shape_and_ranges(tmp_path: Path) -> None:
     assert 0.0 <= payload["cpu_percent"] <= 100.0
     assert 0.0 <= payload["memory_percent"] <= 100.0
     assert payload["cpu_count"] >= 1
+    assert isinstance(payload["cpu_per_core_percent"], list)
+    assert all(0.0 <= value <= 100.0 for value in payload["cpu_per_core_percent"])
     assert payload["timestamp"] > 0
 
 

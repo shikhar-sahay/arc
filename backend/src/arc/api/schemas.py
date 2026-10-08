@@ -51,6 +51,7 @@ class SystemResponse(BaseModel):
     memory_percent: float
     cpu_count: int
     timestamp: float
+    cpu_per_core_percent: list[float] = Field(default_factory=list)
 
     @classmethod
     def from_snapshot(cls, snapshot: SystemSnapshot) -> "SystemResponse":
@@ -60,6 +61,7 @@ class SystemResponse(BaseModel):
             memory_percent=snapshot.memory_percent,
             cpu_count=snapshot.cpu_count,
             timestamp=snapshot.timestamp,
+            cpu_per_core_percent=list(snapshot.cpu_per_core_percent),
         )
 
 

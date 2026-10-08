@@ -24,6 +24,7 @@ class SystemSnapshot:
     memory_percent: float
     cpu_count: int
     timestamp: float
+    cpu_per_core_percent: tuple[float, ...] = ()
 
 
 def _clamp_percent(value: float) -> float:
@@ -34,6 +35,9 @@ def sample_system() -> SystemSnapshot:
     """Take one non-blocking system snapshot. Read-only."""
     try:
         cpu = _clamp_percent(psutil.cpu_percent(interval=None))
+        per_core = tuple(
+            _clamp_percent(value) for value in psutil.cpu_percent(interval=None, percpu=True)
+        )
         memory = _clamp_percent(psutil.virtual_memory().percent)
         count = psutil.cpu_count(logical=True) or 1
     except Exception as exc:
@@ -44,6 +48,7 @@ def sample_system() -> SystemSnapshot:
         memory_percent=memory,
         cpu_count=int(count),
         timestamp=time.time(),
+        cpu_per_core_percent=per_core,
     )
 
 
@@ -53,6 +58,7 @@ class SystemMonitor:
     def __init__(self) -> None:
         try:
             psutil.cpu_percent(interval=None)
+            psutil.cpu_percent(interval=None, percpu=True)
         except Exception as exc:
             logger.warning("system monitor priming failed: %s", exc)
 

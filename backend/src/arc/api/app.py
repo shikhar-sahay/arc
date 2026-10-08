@@ -153,6 +153,7 @@ def websocket_state_payload(engine: ObservationEngine, message_type: str) -> dic
                 "memory_percent": telemetry.memory_percent,
                 "cpu_count": telemetry.cpu_count,
                 "timestamp": telemetry.timestamp,
+                "cpu_per_core_percent": list(telemetry.cpu_per_core_percent),
             }
             if telemetry
             else None

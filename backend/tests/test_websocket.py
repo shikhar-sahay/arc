@@ -1,12 +1,13 @@
 """Tests for WebSocket endpoint state streaming."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from arc.api.app import create_app, websocket_state_payload
 from arc.core.engine import ObservationEngine
-from tests.conftest import make_fake
+from tests.conftest import make_fake, make_telemetry
 
 
 def test_websocket_initial_state(tmp_path: Path) -> None:
@@ -24,11 +25,16 @@ def test_websocket_initial_state(tmp_path: Path) -> None:
 def test_websocket_tick_payload_has_complete_event_and_telemetry_shape() -> None:
     engine = ObservationEngine(resource_adapter=make_fake(pid=50))
     engine.start()
+    engine.step(
+        replace(make_telemetry(cpu=42.0), cpu_per_core_percent=(30.0, 54.0)),
+        [],
+        now=0.0,
+    )
 
     payload = websocket_state_payload(engine, "tick")
 
     assert payload["type"] == "tick"
-    assert payload["telemetry"] is None
+    assert payload["telemetry"]["cpu_per_core_percent"] == [30.0, 54.0]
     assert set(payload["status"]) == {
         "running",
         "contract_count",
