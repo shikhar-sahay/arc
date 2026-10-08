@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { ContractStatus } from "../types";
 import { LifecycleBadge } from "../components/Badge";
-import { opSymbol, describeAction } from "../lib/utils";
+import {
+  opSymbol,
+  describeAction,
+  isProtectedLifecycle,
+  lifecycleCounts,
+} from "../lib/utils";
 import { api } from "../lib/api";
 import { ContractEditor } from "../components/ContractEditor";
 
@@ -107,16 +112,12 @@ export function ContractsPage({
     }
   }
 
+  const states = lifecycleCounts(contracts);
   const counts = {
     total: contracts.length,
     enabled: contracts.filter((cs) => cs.contract.enabled).length,
-    active: contracts.filter(
-      (cs) =>
-        cs.lifecycle === "active" ||
-        cs.lifecycle === "activating" ||
-        cs.lifecycle === "restoring",
-    ).length,
-    error: contracts.filter((cs) => cs.lifecycle === "error").length,
+    active: states.active + states.activating + states.restoring,
+    error: states.error,
   };
 
   return (
@@ -164,8 +165,8 @@ export function ContractsPage({
 
       {/* Action error banner */}
       {actionError && (
-        <div className="bg-rose-950/60 border border-rose-800 rounded p-3 text-xs font-mono text-rose-300 flex items-center justify-between">
-          <span>{actionError}</span>
+        <div className="bg-rose-950/60 border border-rose-800 rounded p-3 text-xs font-mono text-rose-300 flex items-start justify-between gap-4">
+          <span className="break-words min-w-0">{actionError}</span>
           <button
             onClick={() => setActionError(null)}
             className="text-rose-400 hover:text-rose-200 ml-4"
@@ -212,8 +213,8 @@ export function ContractsPage({
 
       {/* Contract table */}
       {contracts.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-          <table className="w-full text-left text-xs">
+        <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-x-auto">
+          <table className="w-full min-w-[1050px] text-left text-xs">
             <thead className="bg-slate-950 text-slate-500 font-mono uppercase text-[10px] border-b border-slate-800">
               <tr>
                 <th className="px-4 py-3">Contract</th>
@@ -227,10 +228,7 @@ export function ContractsPage({
             <tbody className="divide-y divide-slate-800">
               {contracts.map((cs) => {
                 const c = cs.contract;
-                const isBusy =
-                  cs.lifecycle === "active" ||
-                  cs.lifecycle === "activating" ||
-                  cs.lifecycle === "restoring";
+                const isBusy = isProtectedLifecycle(cs.lifecycle);
                 const isError = cs.lifecycle === "error";
 
                 return (
@@ -407,7 +405,7 @@ export function ContractsPage({
 
                         <button
                           onClick={() => handleToggleEnabled(cs)}
-                          disabled={actionPending !== null}
+                          disabled={isBusy || actionPending !== null}
                           title={
                             c.enabled
                               ? "Disable this contract"

@@ -45,6 +45,14 @@ export default function App() {
 
   // Global banner notification for actions
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
+  const [backendError, setBackendError] = useState<string | null>(null);
+
+  const reportBackendError = useCallback((error: unknown) => {
+    const detail = error instanceof Error ? error.message : "request failed";
+    setBackendError(
+      `Backend unavailable: ${detail}. Displayed data is not live.`,
+    );
+  }, []);
 
   // Sync state from WebSocket tick if available
   useEffect(() => {
@@ -97,10 +105,12 @@ export default function App() {
     try {
       const data = await api.getStatus();
       setEngineStatus(data);
-    } catch {
-      // Ignored
+      setBackendError(null);
+    } catch (error) {
+      setEngineStatus(null);
+      reportBackendError(error);
     }
-  }, []);
+  }, [reportBackendError]);
 
   // Fetch telemetry
   const fetchTelemetry = useCallback(async () => {
@@ -115,10 +125,11 @@ export default function App() {
         const next = [...prev, data.memory_percent];
         return next.slice(-MAX_HISTORY_POINTS);
       });
-    } catch {
-      // Ignored
+    } catch (error) {
+      setTelemetry(null);
+      reportBackendError(error);
     }
-  }, []);
+  }, [reportBackendError]);
 
   // Fetch contracts
   const fetchContracts = useCallback(async () => {
@@ -127,12 +138,14 @@ export default function App() {
       const data = await api.getContracts();
       setContracts(data.contracts || []);
       setLoadIssues(data.load_errors || []);
-    } catch {
-      // Ignored
+    } catch (error) {
+      setContracts([]);
+      setLoadIssues([]);
+      reportBackendError(error);
     } finally {
       setContractsLoading(false);
     }
-  }, []);
+  }, [reportBackendError]);
 
   // Fetch processes
   const fetchProcesses = useCallback(async () => {
@@ -143,12 +156,14 @@ export default function App() {
       setTotalProcesses(
         data.total_observed ?? data.count ?? data.processes.length,
       );
-    } catch {
-      // Ignored
+    } catch (error) {
+      setProcesses([]);
+      setTotalProcesses(0);
+      reportBackendError(error);
     } finally {
       setProcLoading(false);
     }
-  }, []);
+  }, [reportBackendError]);
 
   // Fetch events
   const fetchEvents = useCallback(async () => {
@@ -156,12 +171,13 @@ export default function App() {
     try {
       const data = await api.getEvents(200);
       setEvents(data.events || []);
-    } catch {
-      // Ignored
+    } catch (error) {
+      setEvents([]);
+      reportBackendError(error);
     } finally {
       setEventsLoading(false);
     }
-  }, []);
+  }, [reportBackendError]);
 
   // Initial load
   useEffect(() => {
@@ -399,6 +415,12 @@ export default function App() {
         </div>
       )}
 
+      {backendError && (
+        <div className="bg-rose-950/90 border-b border-rose-800 text-rose-200 px-4 py-2 text-xs font-mono break-words">
+          {backendError}
+        </div>
+      )}
+
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {tab === "overview" && (
@@ -444,8 +466,7 @@ export default function App() {
 
       {/* FOOTER */}
       <footer className="border-t border-slate-900 bg-slate-950 py-4 px-4 text-center text-xs font-mono text-slate-600">
-        ARC v0.1 • Linux User-Space Event-Driven Adaptive Resource Contract
-        Engine • Headless-Capable Core
+        ARC • Linux user-space resource contract engine • Headless-capable core
       </footer>
     </div>
   );

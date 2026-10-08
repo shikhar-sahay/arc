@@ -206,10 +206,10 @@ export function EventsPage({ events, loading, onRefresh }: EventsPageProps) {
           return (
             <div
               key={ev.seq}
-              className={`p-3.5 hover:bg-slate-800/40 transition cursor-pointer ${
-                isExpanded ? "bg-slate-800/30" : ""
-              }`}
-              onClick={() => toggleExpand(ev.seq)}
+              className={`p-3.5 hover:bg-slate-800/40 transition ${
+                hasDetails ? "cursor-pointer" : ""
+              } ${isExpanded ? "bg-slate-800/30" : ""}`}
+              onClick={() => hasDetails && toggleExpand(ev.seq)}
             >
               <div className="flex items-start space-x-3">
                 {/* Sequence number */}

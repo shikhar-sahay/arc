@@ -131,8 +131,8 @@ export function ProcessesPage({
       </div>
 
       {/* Process table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-        <table className="w-full text-left text-xs">
+      <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-x-auto">
+        <table className="w-full min-w-[900px] text-left text-xs">
           <thead className="bg-slate-950 text-slate-500 font-mono uppercase text-[10px] border-b border-slate-800">
             <tr>
               <th

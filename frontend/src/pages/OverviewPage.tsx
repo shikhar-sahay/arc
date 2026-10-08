@@ -6,7 +6,13 @@ import {
 } from "../types";
 import { MiniSparkline } from "../components/MiniSparkline";
 import { LifecycleBadge, SeverityBadge } from "../components/Badge";
-import { formatTimestamp, opSymbol, describeAction } from "../lib/utils";
+import {
+  formatTimestamp,
+  opSymbol,
+  describeAction,
+  isProtectedLifecycle,
+  lifecycleCounts,
+} from "../lib/utils";
 import { WsStatus } from "../useWebSocket";
 
 interface OverviewPageProps {
@@ -97,21 +103,14 @@ export function OverviewPage({
   onNavigateEvents,
   onNavigateContracts,
 }: OverviewPageProps) {
-  const activeContracts = contracts.filter(
-    (cs) =>
-      cs.lifecycle === "active" ||
-      cs.lifecycle === "activating" ||
-      cs.lifecycle === "restoring",
+  const activeContracts = contracts.filter((cs) =>
+    isProtectedLifecycle(cs.lifecycle),
   );
 
   const contractCounts = {
+    ...lifecycleCounts(contracts),
     total: contracts.length,
     enabled: contracts.filter((cs) => cs.contract.enabled).length,
-    active: contracts.filter((cs) => cs.lifecycle === "active").length,
-    activating: contracts.filter((cs) => cs.lifecycle === "activating").length,
-    restoring: contracts.filter((cs) => cs.lifecycle === "restoring").length,
-    error: contracts.filter((cs) => cs.lifecycle === "error").length,
-    inactive: contracts.filter((cs) => cs.lifecycle === "inactive").length,
   };
 
   const cpu = telemetry?.cpu_percent ?? null;

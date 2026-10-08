@@ -2,8 +2,8 @@
 
 Authoritative technical architecture for ARC (Adaptive Resource Contract
 Engine). The contract lifecycle through enforcement and restoration is
-implemented for nice values and CPU affinity on Linux. cgroups and
-suspend/resume execution remain planned.
+implemented for nice values, CPU affinity, process suspend and resume,
+and delegated cgroups v2 CPU quotas on Linux.
 
 ## Architectural goals
 
@@ -29,9 +29,8 @@ suspend/resume execution remain planned.
 4. **Linux Integration** (`backend/src/arc/linux`): the only layer
    that names OS resource operations. psutil-based read-only observation
    plus a `ResourceAdapter` protocol with a real Linux implementation
-   (nice and affinity) and an in-memory fake for tests. Enforcement
-   adapters for signals and selected cgroups v2 controls are still to
-   be added.
+   (nice, affinity, signals, and selected cgroups v2 CPU controls) and
+   an in-memory fake for tests.
 5. **Linux Processes and Resources**: the OS-level entities ARC observes
    and acts on.
 
@@ -49,7 +48,7 @@ Dependencies point downward only. The web layer never calls Linux
 integration directly, and the API layer never embeds evaluation or
 enforcement policy.
 
-## ARC Core modules (enforcement implemented for nice/affinity)
+## ARC Core modules
 
 - `core/`: lifecycle states with enforced transitions, per-contract
   runtime state, and the persistent runtime engine loop.
@@ -76,8 +75,10 @@ possible without it.
 ## Configuration versus runtime state
 
 Contract YAML is declarative configuration: identity, target, trigger,
-actions, restore condition. It is loaded once and never rewritten by
-ARC. Runtime state is transient and per contract: matched PIDs, duration
+actions, and restore condition. CRUD and enabled toggles write only this
+configuration, and reload replaces definitions atomically. Protected
+contracts cannot be changed or removed while activating, active, or
+restoring. Runtime state is transient and per contract: matched PIDs, duration
 timers, latest preview outcome, lifecycle state, and errors. It lives in
 `ContractRuntimeState` objects owned by the observation engine and held
 in memory only. There is no database.
@@ -108,8 +109,8 @@ state, the event log, and the latest snapshots. One synchronous step
 performs a full cycle (sample, resolve, evaluate, enforce, restore)
 under a short lock; an async loop only schedules steps and never holds
 the lock across sleeps. HTTP GET handlers only read cached state, they
-never evaluate or enforce. Contracts load at engine start, so editing
-YAML requires a restart for now.
+never evaluate or enforce. Contract reload is an explicit mutation.
+The observation-only WebSocket sends initial state and periodic ticks.
 
 On graceful shutdown the engine best-effort restores every ACTIVE
 contract before exiting and reports failures instead of abandoning
@@ -117,9 +118,9 @@ modified resources.
 
 ## Resource adapter boundary
 
-Domain code never calls scheduling APIs directly. All nice and affinity
-work goes through `ResourceAdapter` (`get_identity`, `get/set_nice`,
-`get/set_affinity`). The real implementation refuses clearly off Linux
+Domain code never calls scheduling or signal APIs directly. Nice,
+affinity, suspend, and resume work go through `ResourceAdapter`. CPU
+quota uses the explicit cgroups v2 manager boundary. The real implementation refuses clearly off Linux
 and maps kernel denials to explicit errors. Tests use the in-memory
 fake, which never stands in for real operations.
 
@@ -152,7 +153,7 @@ flowchart LR
   Restore --> Mon
 ```
 
-## Contract lifecycle (implemented for nice/affinity)
+## Contract lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -175,7 +176,7 @@ State snapshots are taken during `ACTIVATING`, before any resource is
 mutated. `RESTORING` writes back the recorded values, not assumed defaults.
 For example, if a process had nice value 5, ARC records 5, may change it to
 15 while active, and restores 15 back to 5 on termination. The same
-principle will apply to CPU affinity and other reversible controls.
+principle also applies to CPU affinity, signal state, and CPU quota.
 
 ## Observability requirement
 
@@ -190,19 +191,20 @@ logged as enforcement.
 
 ## Concurrency considerations
 
-Monitoring, evaluation, and enforcement run on different cadences and must
-coordinate: a trigger may fire while a previous activation is still
-restoring. The core must serialize lifecycle transitions per contract and
-avoid acting on stale observations. Shared state (active contracts,
-snapshots) needs explicit ownership and locking discipline once background
-loops are introduced.
+The persistent engine serializes sampling, evaluation, enforcement, and
+restoration under its state lock. API mutations use the same boundary.
+The async loop sleeps without the lock, and WebSocket broadcasting only
+reads copied engine state.
 
 ## Privilege and protection considerations
 
 Some operations (changing another user's nice value, managing cgroups,
 sending signals) require appropriate capabilities or ownership. Adapters
 must check preconditions, attempt the operation, and surface failures with
-context. They must never report success when the kernel refused the change.
+context. Signal safety refuses init, ARC itself, and ARC's parent chain,
+while identity-pinned processes suspended by ARC remain eligible for exact
+restoration. ARC never invokes sudo and never reports success when the
+kernel refused the change.
 
 ## Platform constraints
 

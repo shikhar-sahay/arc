@@ -14,6 +14,7 @@ interface ContractEditorProps {
 const METRICS = [
   { value: "system.cpu.percent", label: "system.cpu.percent" },
   { value: "system.memory.percent", label: "system.memory.percent" },
+  { value: "target.process.present", label: "target.process.present" },
 ];
 
 const OPERATORS = [
@@ -21,7 +22,13 @@ const OPERATORS = [
   { value: "gte", label: ">=" },
   { value: "lt", label: "<" },
   { value: "lte", label: "<=" },
+  { value: "eq", label: "=" },
+  { value: "ne", label: "!=" },
 ];
+
+const BOOLEAN_OPERATORS = OPERATORS.filter((operator) =>
+  ["eq", "ne"].includes(operator.value),
+);
 
 type ActionType = "nice" | "cpu_affinity" | "suspend" | "resume" | "cpu_quota";
 
@@ -268,6 +275,7 @@ export function ContractEditor({
       restoreOp: formRestoreOp,
       restoreVal: formRestoreVal,
       restoreSec: formRestoreSec,
+      enabled: c?.enabled ?? true,
     });
 
     // Validate via backend
@@ -277,8 +285,12 @@ export function ContractEditor({
         setFormError(valResult.error ?? "Validation failed");
         return;
       }
-    } catch {
-      setFormError("Validation endpoint unreachable");
+    } catch (err) {
+      setFormError(
+        err instanceof Error
+          ? `Backend validation unavailable: ${err.message}`
+          : "Backend validation unavailable",
+      );
       return;
     }
 
@@ -437,7 +449,14 @@ export function ContractEditor({
                   <label className={labelCls}>Metric</label>
                   <select
                     value={formTriggerMetric}
-                    onChange={(e) => setFormTriggerMetric(e.target.value)}
+                    onChange={(e) => {
+                      const metric = e.target.value;
+                      setFormTriggerMetric(metric);
+                      if (metric === "target.process.present") {
+                        setFormTriggerOp("eq");
+                        setFormTriggerVal("true");
+                      }
+                    }}
                     className={inputCls}
                   >
                     {METRICS.map((m) => (
@@ -454,7 +473,10 @@ export function ContractEditor({
                     onChange={(e) => setFormTriggerOp(e.target.value)}
                     className={inputCls}
                   >
-                    {OPERATORS.map((o) => (
+                    {(formTriggerMetric === "target.process.present"
+                      ? BOOLEAN_OPERATORS
+                      : OPERATORS
+                    ).map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
@@ -462,17 +484,28 @@ export function ContractEditor({
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>Value (%)</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    max="100"
-                    step="0.5"
-                    value={formTriggerVal}
-                    onChange={(e) => setFormTriggerVal(e.target.value)}
-                    className={inputCls}
-                  />
+                  <label className={labelCls}>Value</label>
+                  {formTriggerMetric === "target.process.present" ? (
+                    <select
+                      value={formTriggerVal}
+                      onChange={(e) => setFormTriggerVal(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={formTriggerVal}
+                      onChange={(e) => setFormTriggerVal(e.target.value)}
+                      className={inputCls}
+                    />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>For (seconds)</label>
@@ -642,7 +675,14 @@ export function ContractEditor({
                   <label className={labelCls}>Metric</label>
                   <select
                     value={formRestoreMetric}
-                    onChange={(e) => setFormRestoreMetric(e.target.value)}
+                    onChange={(e) => {
+                      const metric = e.target.value;
+                      setFormRestoreMetric(metric);
+                      if (metric === "target.process.present") {
+                        setFormRestoreOp("eq");
+                        setFormRestoreVal("false");
+                      }
+                    }}
                     className={inputCls}
                   >
                     {METRICS.map((m) => (
@@ -659,7 +699,10 @@ export function ContractEditor({
                     onChange={(e) => setFormRestoreOp(e.target.value)}
                     className={inputCls}
                   >
-                    {OPERATORS.map((o) => (
+                    {(formRestoreMetric === "target.process.present"
+                      ? BOOLEAN_OPERATORS
+                      : OPERATORS
+                    ).map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
@@ -667,17 +710,28 @@ export function ContractEditor({
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>Value (%)</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    max="100"
-                    step="0.5"
-                    value={formRestoreVal}
-                    onChange={(e) => setFormRestoreVal(e.target.value)}
-                    className={inputCls}
-                  />
+                  <label className={labelCls}>Value</label>
+                  {formRestoreMetric === "target.process.present" ? (
+                    <select
+                      value={formRestoreVal}
+                      onChange={(e) => setFormRestoreVal(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={formRestoreVal}
+                      onChange={(e) => setFormRestoreVal(e.target.value)}
+                      className={inputCls}
+                    />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>For (seconds)</label>

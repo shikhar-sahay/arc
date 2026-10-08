@@ -71,6 +71,20 @@ export function describeAction(act: {
   }
 }
 
+export function isProtectedLifecycle(lifecycle: string): boolean {
+  return ["activating", "active", "restoring"].includes(lifecycle);
+}
+
+export function lifecycleCounts(items: Array<{ lifecycle: string }>) {
+  return {
+    active: items.filter((item) => item.lifecycle === "active").length,
+    activating: items.filter((item) => item.lifecycle === "activating").length,
+    restoring: items.filter((item) => item.lifecycle === "restoring").length,
+    error: items.filter((item) => item.lifecycle === "error").length,
+    inactive: items.filter((item) => item.lifecycle === "inactive").length,
+  };
+}
+
 /** Clamp a number to a range for display bars. */
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));

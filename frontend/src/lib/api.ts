@@ -51,36 +51,42 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const API_BASE = (import.meta.env.VITE_ARC_API_URL ?? "").replace(/\/$/, "");
+
+function endpoint(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 export const api = {
   async getStatus(): Promise<EngineStatus> {
-    const res = await fetch("/api/status");
+    const res = await fetch(endpoint("/api/status"));
     return handleResponse<EngineStatus>(res);
   },
 
   async getSystem(): Promise<SystemTelemetry> {
-    const res = await fetch("/api/system");
+    const res = await fetch(endpoint("/api/system"));
     return handleResponse<SystemTelemetry>(res);
   },
 
   async getContracts(): Promise<ContractListResponse> {
-    const res = await fetch("/api/contracts");
+    const res = await fetch(endpoint("/api/contracts"));
     return handleResponse<ContractListResponse>(res);
   },
 
   async getProcesses(limit = 300): Promise<ProcessListResponse> {
-    const res = await fetch(`/api/processes?limit=${limit}`);
+    const res = await fetch(endpoint(`/api/processes?limit=${limit}`));
     return handleResponse<ProcessListResponse>(res);
   },
 
   async getEvents(limit = 200): Promise<EventListResponse> {
-    const res = await fetch(`/api/events?limit=${limit}`);
+    const res = await fetch(endpoint(`/api/events?limit=${limit}`));
     return handleResponse<EventListResponse>(res);
   },
 
   async validateContract(
     payload: unknown,
   ): Promise<{ valid: boolean; error?: string }> {
-    const res = await fetch("/api/contracts/validate", {
+    const res = await fetch(endpoint("/api/contracts/validate"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -89,7 +95,7 @@ export const api = {
   },
 
   async createContract(contract: unknown): Promise<ContractStatus> {
-    const res = await fetch("/api/contracts", {
+    const res = await fetch(endpoint("/api/contracts"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(contract),
@@ -98,7 +104,7 @@ export const api = {
   },
 
   async updateContract(id: string, contract: unknown): Promise<ContractStatus> {
-    const res = await fetch(`/api/contracts/${id}`, {
+    const res = await fetch(endpoint(`/api/contracts/${id}`), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(contract),
@@ -107,12 +113,14 @@ export const api = {
   },
 
   async deleteContract(id: string): Promise<void> {
-    const res = await fetch(`/api/contracts/${id}`, { method: "DELETE" });
+    const res = await fetch(endpoint(`/api/contracts/${id}`), {
+      method: "DELETE",
+    });
     return handleResponse<void>(res);
   },
 
   async toggleEnabled(id: string, enabled: boolean): Promise<ContractStatus> {
-    const res = await fetch(`/api/contracts/${id}/enabled`, {
+    const res = await fetch(endpoint(`/api/contracts/${id}/enabled`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
@@ -121,12 +129,14 @@ export const api = {
   },
 
   async resetContract(id: string): Promise<void> {
-    const res = await fetch(`/api/contracts/${id}/reset`, { method: "POST" });
+    const res = await fetch(endpoint(`/api/contracts/${id}/reset`), {
+      method: "POST",
+    });
     return handleResponse<void>(res);
   },
 
   async reloadContracts(): Promise<{ status: string; contract_count: number }> {
-    const res = await fetch("/api/engine/reload", { method: "POST" });
+    const res = await fetch(endpoint("/api/engine/reload"), { method: "POST" });
     return handleResponse<{ status: string; contract_count: number }>(res);
   },
 };
@@ -146,13 +156,14 @@ export function buildContractPayload(fields: {
   restoreOp: string;
   restoreVal: string;
   restoreSec: string;
+  enabled?: boolean;
 }): Omit<Contract, "version"> & { version: 1 } {
   return {
     version: 1,
     id: fields.id.trim(),
     name: fields.name.trim(),
     description: fields.description.trim() || null,
-    enabled: true,
+    enabled: fields.enabled ?? true,
     target: {
       type: "process",
       match: {
@@ -163,14 +174,20 @@ export function buildContractPayload(fields: {
     trigger: {
       metric: fields.triggerMetric,
       operator: fields.triggerOp,
-      value: parseFloat(fields.triggerVal),
+      value:
+        fields.triggerMetric === "target.process.present"
+          ? fields.triggerVal === "true"
+          : parseFloat(fields.triggerVal),
       for_seconds: parseFloat(fields.triggerSec),
     },
     actions: fields.actions,
     restore: {
       metric: fields.restoreMetric,
       operator: fields.restoreOp,
-      value: parseFloat(fields.restoreVal),
+      value:
+        fields.restoreMetric === "target.process.present"
+          ? fields.restoreVal === "true"
+          : parseFloat(fields.restoreVal),
       for_seconds: parseFloat(fields.restoreSec),
     },
   };

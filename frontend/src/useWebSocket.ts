@@ -24,14 +24,18 @@ export function useWebSocket() {
 
     function connect() {
       if (!mountedRef.current) return;
+      setWsStatus("reconnecting");
       // Close any existing socket before opening a new one
       if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
         wsRef.current.close();
       }
 
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws`;
+      const configured = import.meta.env.VITE_ARC_API_URL as string | undefined;
+      const base = configured
+        ? new URL(configured, window.location.href)
+        : window.location;
+      const protocol = base.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${base.host}/ws`;
 
       let ws: WebSocket;
       try {
@@ -78,6 +82,7 @@ export function useWebSocket() {
 
     function scheduleReconnect() {
       if (!mountedRef.current) return;
+      setWsStatus("disconnected");
       retryCountRef.current += 1;
       const delay = getRetryDelay();
       reconnectTimeoutRef.current = window.setTimeout(connect, delay);

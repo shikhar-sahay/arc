@@ -73,7 +73,7 @@ logs and events, no external database.
 
 ```text
 .
-├── backend/            # Python packaging, ARC API, future core engine
+├── backend/            # Python packaging, ARC API, and core engine
 │   ├── pyproject.toml
 │   ├── src/arc/        # api, core, contracts, monitoring, evaluation,
 │   │                   # enforcement, restoration, observability, cli
@@ -121,7 +121,13 @@ npm run dev
 ```
 
 The Vite dev server runs on `http://localhost:5173` and proxies `/api`
-to the backend on port 8000.
+and `/ws` to the backend on port 8000. `VITE_ARC_API_URL` may specify a
+different backend origin for both REST and WebSocket traffic.
+
+The four-page interface provides an overview, contract CRUD and reload,
+process observation, and structured events. It reports REST failures and
+WebSocket connection state explicitly. The backend remains authoritative
+for schema validation and policy behavior.
 
 ## Testing and quality
 
@@ -159,28 +165,48 @@ Implemented:
 - read-only system and process monitoring built on psutil
 - process target resolution without persisted PIDs
 - trigger evaluation with monotonic duration handling and hysteresis
-- real Linux enforcement of `nice` and `cpu_affinity` through a
-  `ResourceAdapter` boundary (snapshot, apply in order, verify,
-  roll back on failure)
+- condition metrics `system.cpu.percent`, `system.memory.percent`, and
+  `target.process.present`, including duration and boolean comparisons
+- real Linux enforcement of `nice`, `cpu_affinity`, `suspend`, `resume`,
+  and cgroups v2 `cpu_quota` through explicit Linux adapter boundaries
+  (snapshot, apply in order, verify, roll back on failure)
 - exact restoration with PID plus creation-time identity checks
 - persistent runtime engine with lifecycle states, bounded event
   history, and graceful shutdown restoration
+- contract create, update, delete, enabled toggle, validation, reload,
+  and manual ERROR reset through the API and frontend
 - API: `GET /api/health`, `GET /api/status`, `GET /api/system`,
   `GET /api/contracts`, `GET /api/processes`, `GET /api/events`
-  (all read engine state, none enforce)
+  (all GET endpoints read engine state, none enforce), plus `/ws` for
+  observation-only initial state and tick messages
 - headless runner (`arc run`) and contract validation CLI
 - reproducible Linux demo (`scripts/demo_cpu_worker.py`, `docs/demo.md`)
-
-Not yet implemented:
-
-- `suspend`/`resume` execution (validated, explicitly rejected at
-  activation), cgroups enforcement
-- WebSocket live event streaming, final dashboard, hot contract reload
 
 Linux is required for enforcement. Raising nice values on your own
 processes usually works unprivileged, but restoring them back down may
 need privilege (`CAP_SYS_NICE`); ARC reports denials honestly instead
 of faking success. See `docs/demo.md` for the full story.
+
+## WSL demo setup
+
+Use WSL 2 with a current Linux distribution. Clone the repository inside
+the Linux filesystem, install Python 3.12+, Node.js 20+, and the backend
+development dependencies, then validate all examples:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+arc validate ../contracts/examples
+```
+
+For a reproducible run, follow `docs/demo.md`: start the demo worker,
+copy the chosen example into `contracts/`, run `arc run`, and stop with
+Ctrl+C to exercise restoration. Signal operations require ownership of
+the target. Lowering a nice value can require `CAP_SYS_NICE`. CPU quota
+requires a writable delegated cgroups v2 subtree. ARC does not invoke
+sudo or bypass a denial.
 
 ## Academic context
 
