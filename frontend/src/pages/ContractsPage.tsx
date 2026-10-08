@@ -63,7 +63,7 @@ export function ContractsPage({
       <header className="page-header">
         <div>
           <div className="page-kicker">Policy workspace</div>
-          <h1 className="page-title">Resource contracts</h1>
+          <h1 className="page-title">Resource Contracts</h1>
           <p className="page-description">
             Declarative Linux policies connect a measured condition to process
             resource controls and exact restoration.

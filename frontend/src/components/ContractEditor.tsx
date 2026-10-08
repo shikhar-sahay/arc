@@ -51,10 +51,9 @@ function draftToAction(d: ActionDraft): Action | null {
       return { type: "nice", value: v };
     }
     case "cpu_affinity": {
-      const cpus = d.affinityCpus
-        .split(",")
-        .map((s) => parseInt(s.trim(), 10))
-        .filter((n) => !isNaN(n));
+      const tokens = d.affinityCpus.split(",").map((value) => value.trim());
+      if (tokens.some((value) => !/^\d+$/.test(value))) return null;
+      const cpus = [...new Set(tokens.map(Number))];
       if (cpus.length === 0) return null;
       return { type: "cpu_affinity", cpus };
     }
@@ -259,6 +258,21 @@ export function ContractEditor({
       return;
     }
 
+    const triggerDuration = Number(formTriggerSec);
+    const restoreDuration = Number(formRestoreSec);
+    if (!Number.isFinite(triggerDuration) || triggerDuration < 0) {
+      setFormError("Trigger duration must be zero or a positive number.");
+      return;
+    }
+    if (!Number.isFinite(restoreDuration) || restoreDuration < 0) {
+      setFormError("Restoration duration must be zero or a positive number.");
+      return;
+    }
+    if (!formExecutable.trim() && !formCommand.trim()) {
+      setFormError("Target requires an executable or command match.");
+      return;
+    }
+
     const payload = buildContractPayload({
       id: formId,
       name: formName,
@@ -320,7 +334,7 @@ export function ContractEditor({
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
+      className="contract-editor fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-label={title}

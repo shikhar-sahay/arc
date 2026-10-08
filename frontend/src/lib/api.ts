@@ -34,7 +34,22 @@ export interface EventListResponse {
 }
 
 export interface ApiError {
-  detail: string;
+  detail: unknown;
+}
+
+function errorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return String(item);
+        const issue = item as { loc?: unknown[]; msg?: string };
+        const location = issue.loc?.slice(1).join(".");
+        return `${location ? `${location}: ` : ""}${issue.msg ?? "Invalid value"}`;
+      })
+      .join("; ");
+  }
+  return fallback;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -42,7 +57,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     let detail = `HTTP ${res.status}`;
     try {
       const err = (await res.json()) as ApiError;
-      detail = err.detail || detail;
+      detail = errorDetail(err.detail, detail);
     } catch {
       // Ignore parse error
     }

@@ -5,6 +5,8 @@ import {
   Cpu,
   FileCode2,
   LayoutDashboard,
+  Moon,
+  Sun,
 } from "lucide-react";
 import {
   ArcEvent,
@@ -19,6 +21,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { ContractsPage } from "./pages/ContractsPage";
 import { ProcessesPage } from "./pages/ProcessesPage";
 import { EventsPage } from "./pages/EventsPage";
+import { applyTheme, getInitialTheme, Theme } from "./lib/theme";
 
 type NavTab = "overview" | "contracts" | "processes" | "events";
 const MAX_HISTORY_POINTS = 60;
@@ -42,6 +45,12 @@ export default function App() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    setTheme(next);
+  };
 
   const appendTelemetry = useCallback((sample: SystemTelemetry) => {
     setTelemetry(sample);
@@ -212,11 +221,16 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand">
-          <div className="brand-mark">ARC</div>
-          <div>
-            <strong>ARC Engine</strong>
-            <span>Resource policy control</span>
-          </div>
+          <img
+            className="brand-logo brand-logo-dark"
+            src="/brand/arc-logo-horizontal-light.svg"
+            alt="ARC"
+          />
+          <img
+            className="brand-logo brand-logo-light"
+            src="/brand/arc-logo-horizontal-dark.svg"
+            alt="ARC"
+          />
         </div>
         <div className="nav-label">Workspace</div>
         <nav className="nav-list">
@@ -235,6 +249,14 @@ export default function App() {
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-status">
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          >
+            {theme === "dark" ? <Moon size={13} /> : <Sun size={13} />}
+            <span>{theme === "dark" ? "Dark" : "Light"} Appearance</span>
+          </button>
           <div className="status-line">
             <span
               className={`status-dot ${backendError ? "bad" : wsStatus === "connected" ? "ok" : "warn"}`}
@@ -256,9 +278,25 @@ export default function App() {
       <div className="main-column">
         <div className="mobile-bar">
           <div className="mobile-brand">
-            <div className="brand-mark">ARC</div>ARC Engine
+            <img
+              className="brand-mark-image brand-logo-dark"
+              src="/brand/arc-mark-light.svg"
+              alt=""
+            />
+            <img
+              className="brand-mark-image brand-logo-light"
+              src="/brand/arc-mark-dark.svg"
+              alt=""
+            />
+            ARC Engine
           </div>
-          <span className={`status-dot ${backendError ? "bad" : "ok"}`} />
+          <button
+            className="button icon-button"
+            onClick={toggleTheme}
+            aria-label="Toggle appearance"
+          >
+            {theme === "dark" ? <Moon size={14} /> : <Sun size={14} />}
+          </button>
         </div>
         {backendError && (
           <div className="notice error" style={{ margin: "12px 14px 0" }}>

@@ -63,7 +63,7 @@ export function EventsPage({ events, loading, onRefresh }: Props) {
       <header className="page-header">
         <div>
           <div className="page-kicker">Observability</div>
-          <h1 className="page-title">Audit log</h1>
+          <h1 className="page-title">Audit Log</h1>
           <p className="page-description">
             Bounded in-memory lifecycle history. Events distinguish decisions,
             verified enforcement, restoration, and failures.

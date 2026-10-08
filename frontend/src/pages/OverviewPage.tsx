@@ -72,7 +72,7 @@ export function OverviewPage({
       <header className="page-header">
         <div>
           <div className="page-kicker">Operations</div>
-          <h1 className="page-title">System overview</h1>
+          <h1 className="page-title">System Overview</h1>
           <p className="page-description">
             Live Linux telemetry, policy state, and recent engine decisions from
             the persistent ARC runtime.
@@ -100,7 +100,7 @@ export function OverviewPage({
         <div className="metric-tile">
           <div className="metric-label">
             <Cpu size={14} />
-            CPU utilization
+            CPU Utilization
           </div>
           <div className="metric-value" style={{ color: "var(--blue)" }}>
             {telemetry ? `${telemetry.cpu_percent.toFixed(1)}%` : "--"}
@@ -112,7 +112,7 @@ export function OverviewPage({
         <div className="metric-tile">
           <div className="metric-label">
             <MemoryStick size={14} />
-            Memory utilization
+            Memory Utilization
           </div>
           <div className="metric-value" style={{ color: "var(--purple)" }}>
             {telemetry ? `${telemetry.memory_percent.toFixed(1)}%` : "--"}
@@ -122,7 +122,7 @@ export function OverviewPage({
         <div className="metric-tile">
           <div className="metric-label">
             <FileCode2 size={14} />
-            Resource contracts
+            Resource Contracts
           </div>
           <div className="metric-value">{contracts.length}</div>
           <div className="metric-note">
@@ -132,7 +132,7 @@ export function OverviewPage({
         <div className="metric-tile">
           <div className="metric-label">
             <Activity size={14} />
-            Managed processes
+            Managed Processes
           </div>
           <div className="metric-value">{managed.length}</div>
           <div className="metric-note">
@@ -149,7 +149,7 @@ export function OverviewPage({
             <div className="panel-header">
               <div className="panel-title">
                 <Activity size={14} />
-                Utilization history
+                Utilization History
               </div>
               <div className="panel-subtle">Rolling 60 samples · 0 to 100%</div>
             </div>
@@ -157,8 +157,12 @@ export function OverviewPage({
               <TelemetryChart
                 height={190}
                 series={[
-                  { label: "CPU", values: cpuHistory, color: "#5aa9fa" },
-                  { label: "Memory", values: memHistory, color: "#b28bf4" },
+                  { label: "CPU", values: cpuHistory, color: "var(--blue)" },
+                  {
+                    label: "Memory",
+                    values: memHistory,
+                    color: "var(--purple)",
+                  },
                 ]}
               />
             </div>
@@ -167,7 +171,7 @@ export function OverviewPage({
             <div className="panel-header">
               <div className="panel-title">
                 <Cpu size={14} />
-                Logical processors
+                Logical Processors
               </div>
               <div className="panel-subtle">Current non-blocking sample</div>
             </div>
@@ -202,7 +206,7 @@ export function OverviewPage({
             <div className="panel-header">
               <div className="panel-title">
                 <FileCode2 size={14} />
-                Policy activity
+                Policy Activity
               </div>
               <button
                 className="button icon-button"
@@ -259,7 +263,7 @@ export function OverviewPage({
             <div className="panel-header">
               <div className="panel-title">
                 <Activity size={14} />
-                Recent decisions
+                Recent Decisions
               </div>
               <button
                 className="button icon-button"
@@ -306,7 +310,7 @@ export function OverviewPage({
             >
               <div className="panel-title">
                 <ServerCog size={14} />
-                Linux capabilities
+                Linux Capabilities
               </div>
               <span className="panel-subtle">Detection and access</span>
             </summary>

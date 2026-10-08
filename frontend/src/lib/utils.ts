@@ -30,6 +30,24 @@ export function formatSecondsAgo(epochSeconds: number): string {
   return `${Math.round(diff / 3600)}h ago`;
 }
 
+export function formatCpuAffinity(cpus: number[] | null | undefined): string {
+  if (!cpus?.length) return "--";
+  const values = [...new Set(cpus)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let start = values[0];
+  let end = start;
+  for (const value of values.slice(1)) {
+    if (value === end + 1) {
+      end = value;
+      continue;
+    }
+    parts.push(start === end ? `${start}` : `${start}–${end}`);
+    start = end = value;
+  }
+  parts.push(start === end ? `${start}` : `${start}–${end}`);
+  return parts.join(", ");
+}
+
 /** Convert an operator string to a human-readable symbol. */
 export function opSymbol(op: string): string {
   switch (op) {

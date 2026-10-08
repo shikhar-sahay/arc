@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ARC: Adaptive Resource Contract Engine</title>
+    <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/brand/favicon.ico" sizes="any" />
+    <meta name="theme-color" content="#0b0d10" />
+    <script>
+      (() => {
+        const saved = localStorage.getItem("arc-theme");
+        const theme =
+          saved === "light" || saved === "dark"
+            ? saved
+            : matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <title>ARC | Adaptive Resource Contract Engine</title>
   </head>
   <body>
     <div id="root"></div>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, Cpu, RefreshCw, Search, X } from "lucide-react";
 import { ProcessItem } from "../types";
+import { formatCpuAffinity } from "../lib/utils";
 
 type SortKey = "pid" | "cpu" | "memory" | "nice" | "name";
 interface Props {
@@ -100,7 +101,7 @@ export function ProcessesPage({
           Managed by ARC
         </label>
       </div>
-      <div className="split-view">
+      <div className={`split-view ${selected ? "has-inspector" : ""}`}>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -158,7 +159,7 @@ export function ProcessesPage({
                 >
                   <td className="mono">{process.pid}</td>
                   <td>
-                    <strong style={{ color: "#e3e4e6", fontWeight: 600 }}>
+                    <strong className="process-name">
                       {process.name || "Unknown"}
                     </strong>
                   </td>
@@ -182,8 +183,11 @@ export function ProcessesPage({
                     {process.memory_percent?.toFixed(1) ?? "--"}%
                   </td>
                   <td className="mono">{process.nice ?? "--"}</td>
-                  <td className="mono">
-                    {process.cpu_affinity?.join(", ") ?? "--"}
+                  <td
+                    className="mono affinity-cell"
+                    title={process.cpu_affinity?.join(", ") ?? ""}
+                  >
+                    {formatCpuAffinity(process.cpu_affinity)}
                   </td>
                   <td>
                     {process.arc_managed ? (
@@ -249,7 +253,7 @@ export function ProcessesPage({
                 </dd>
                 <dt>Nice</dt>
                 <dd className="mono">{selected.nice ?? "Unavailable"}</dd>
-                <dt>CPU affinity</dt>
+                <dt>CPU Affinity</dt>
                 <dd className="mono">
                   {selected.cpu_affinity?.join(", ") ?? "Unavailable"}
                 </dd>
@@ -270,7 +274,7 @@ export function ProcessesPage({
               </div>
               {selected.active_contract_ids.length > 0 && (
                 <div style={{ marginTop: 16 }}>
-                  <div className="page-kicker">Associated contracts</div>
+                  <div className="page-kicker">Associated Contracts</div>
                   {selected.active_contract_ids.map((id) => (
                     <div className="list-primary mono" key={id}>
                       {id}
@@ -314,7 +318,7 @@ function Sortable({
           display: "flex",
           alignItems: "center",
           gap: 4,
-          color: current === value ? "#d9dade" : "inherit",
+          color: current === value ? "var(--text)" : "inherit",
         }}
       >
         {label}
