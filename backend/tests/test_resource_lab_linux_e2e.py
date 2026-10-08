@@ -103,6 +103,11 @@ def test_three_measured_pressure_enforcement_restoration_cycles(tmp_path: Path) 
 def test_separate_suspension_target_does_not_remove_pressure(tmp_path: Path) -> None:
     """Pressure workers keep running while ARC stops and restores a separate target."""
     contract_id = "resource-lab-suspension-e2e"
+    ambient_cpu = psutil.cpu_percent(interval=1.0)
+    if ambient_cpu >= 70:
+        pytest.skip(f"ambient CPU {ambient_cpu:.1f}% leaves insufficient trigger headroom")
+    trigger_value = min(90.0, ambient_cpu + 25.0)
+    restore_value = min(trigger_value - 5.0, ambient_cpu + 12.0)
     contract = {
         "version": 1,
         "id": contract_id,
@@ -119,14 +124,14 @@ def test_separate_suspension_target_does_not_remove_pressure(tmp_path: Path) -> 
         "trigger": {
             "metric": "system.cpu.percent",
             "operator": "gt",
-            "value": 20,
+            "value": trigger_value,
             "for_seconds": 1,
         },
         "actions": [{"type": "suspend"}],
         "restore": {
             "metric": "system.cpu.percent",
             "operator": "lt",
-            "value": 10,
+            "value": restore_value,
             "for_seconds": 1,
         },
     }
