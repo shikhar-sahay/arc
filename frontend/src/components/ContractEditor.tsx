@@ -334,12 +334,12 @@ export function ContractEditor({
 
   return (
     <div
-      className="contract-editor fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
+      className="contract-editor fixed inset-0 bg-black/70 z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div className="bg-[#1b1d1f] border border-[#34373a] rounded-xl max-w-3xl w-full p-5 sm:p-6 space-y-4 shadow-2xl mb-10">
+      <div className="editor-dialog max-w-3xl w-full p-5 sm:p-6 space-y-4 mb-10">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200 font-mono">

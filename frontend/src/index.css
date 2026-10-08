@@ -14,15 +14,15 @@
   background: var(--canvas);
   color: var(--text);
   font-synthesis: none;
-  --canvas: #0b0d0f;
-  --sidebar: #111417;
-  --surface: #171b1f;
-  --surface2: #1d2226;
-  --surface3: #23292e;
-  --line: #292f34;
-  --soft: #22282d;
-  --muted: #96a0a9;
-  --faint: #69737c;
+  --canvas: #08090a;
+  --sidebar: #0d1012;
+  --surface: #111315;
+  --surface2: #17191b;
+  --surface3: #1c1f22;
+  --line: #282c2f;
+  --soft: #1e2225;
+  --muted: #979fa6;
+  --faint: #687178;
   --blue: #5aa9fa;
   --green: #63c58a;
   --amber: #e2aa57;
@@ -30,9 +30,10 @@
   --purple: #b28bf4;
   --text: #f0f2f4;
   --text-soft: #d1d6da;
-  --field: #101316;
-  --hover: #1a1f23;
-  --selected: #252b30;
+  --field: #0c0e10;
+  --hover: #16191b;
+  --selected: #1b2024;
+  --canvas-grid: #ffffff05;
   --grid: #ffffff0b;
   --grid-strong: #ffffff16;
   --shadow: #0005;
@@ -42,20 +43,21 @@
 }
 [data-theme="light"] {
   color-scheme: light;
-  --canvas: #f5f7fa;
-  --sidebar: #eceff2;
-  --surface: #ffffff;
-  --surface2: #f0f2f4;
-  --surface3: #e5e8eb;
-  --line: #cdd2d8;
-  --soft: #e0e4e8;
-  --muted: #5c6570;
-  --faint: #78818b;
+  --canvas: #f6f5f2;
+  --sidebar: #eeede9;
+  --surface: #fcfcfa;
+  --surface2: #f2f1ed;
+  --surface3: #e8e7e2;
+  --line: #cfd0cc;
+  --soft: #e1e1dc;
+  --muted: #5e6468;
+  --faint: #7c8286;
   --text: #111318;
   --text-soft: #30363d;
   --field: #ffffff;
-  --hover: #f1f3f5;
-  --selected: #e5eef8;
+  --hover: #f0efeb;
+  --selected: #e8edef;
+  --canvas-grid: #11131805;
   --grid: #1113180b;
   --grid-strong: #11131818;
   --shadow: #1d273318;
@@ -120,7 +122,7 @@ textarea:focus-visible {
   position: sticky;
   top: 0;
   height: 100vh;
-  background: color-mix(in srgb, var(--sidebar) 97%, transparent);
+  background: var(--sidebar);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -210,7 +212,7 @@ textarea:focus-visible {
   color: var(--text);
   background: var(--surface3);
   border-color: var(--line);
-  box-shadow: 0 1px 2px var(--shadow);
+  box-shadow: none;
 }
 .nav-item .count {
   margin-left: auto;
@@ -273,7 +275,6 @@ textarea:focus-visible {
 }
 .status-dot.ok {
   background: var(--green);
-  box-shadow: 0 0 0 3px #63c58a18;
 }
 .status-dot.warn {
   background: var(--amber);
@@ -283,6 +284,12 @@ textarea:focus-visible {
 }
 .main-column {
   min-width: 0;
+  background-color: var(--canvas);
+  background-image:
+    linear-gradient(var(--canvas-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: -1px -1px;
 }
 .mobile-bar {
   display: none;
@@ -342,7 +349,7 @@ textarea:focus-visible {
   color: var(--text-soft);
   font-size: 12px;
   font-weight: 590;
-  box-shadow: 0 1px 1px var(--shadow);
+  box-shadow: none;
   transition: 120ms ease;
 }
 .button:hover {
@@ -373,7 +380,7 @@ textarea:focus-visible {
   background: var(--surface);
   border: 1px solid var(--soft);
   border-radius: 7px;
-  box-shadow: 0 1px 2px var(--shadow);
+  box-shadow: none;
 }
 .panel-header {
   min-height: 45px;
@@ -583,7 +590,7 @@ textarea:focus-visible {
   gap: 5px;
   min-height: 20px;
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: 4px;
   border: 1px solid var(--line);
   color: var(--muted);
   background: var(--surface2);
@@ -625,7 +632,7 @@ textarea:focus-visible {
   height: 38px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--surface2);
   border: 1px solid var(--line);
   color: var(--muted);
@@ -720,7 +727,7 @@ textarea:focus-visible {
   border: 1px solid #594526;
   background: #292116;
   color: #dfbd84;
-  border-radius: 8px;
+  border-radius: 5px;
   padding: 10px 12px;
   font-size: 11px;
   line-height: 1.45;
@@ -734,7 +741,7 @@ textarea:focus-visible {
   width: 100%;
   min-height: 34px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 5px;
   background: var(--field);
   color: var(--text);
   padding: 0 10px;
@@ -751,14 +758,14 @@ textarea:focus-visible {
   padding: 10px;
   background: var(--surface);
   border: 1px solid var(--soft);
-  border-radius: 9px;
+  border-radius: 6px;
   margin-bottom: 10px;
 }
 .table-wrap {
   overflow: auto;
   max-height: calc(100vh - 215px);
   border: 1px solid var(--soft);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--surface);
 }
 .data-table {
@@ -909,6 +916,12 @@ textarea:focus-visible {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.editor-dialog {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+}
 @media (max-width: 1050px) {
   .app-shell {
     grid-template-columns: 190px minmax(0, 1fr);
@@ -943,7 +956,6 @@ textarea:focus-visible {
     border-right: 0;
     border-top: 1px solid var(--line);
     background: color-mix(in srgb, var(--sidebar) 96%, transparent);
-    backdrop-filter: blur(18px);
   }
   .brand,
   .nav-label,
